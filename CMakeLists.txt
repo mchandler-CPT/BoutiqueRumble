@@ -27,6 +27,8 @@ target_sources(BoutiqueRumble PRIVATE
     Source/DSP/Oscillator.h
     Source/DSP/RumbleEngine.h
     Source/Parameters/ParamConstants.h
+    Source/UI/BoutiqueLookAndFeel.cpp
+    Source/UI/BoutiqueLookAndFeel.h
 ) 
 
 target_include_directories(BoutiqueRumble PRIVATE Source)

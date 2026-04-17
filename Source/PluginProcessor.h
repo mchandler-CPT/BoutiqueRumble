@@ -10,6 +10,7 @@ public:
     ~BoutiqueRumbleAudioProcessor() override;
 
     juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
+    juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;

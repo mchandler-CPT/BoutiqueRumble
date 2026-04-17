@@ -14,6 +14,7 @@
 - **[2026-04-17] Functional Signal Path**: Transitioned from silent stubs to a working core path—Poly-BLEP morphing oscillator (sine/square/saw), 3-voice `RumbleEngine` (1 sub + 2 mids), and processor integration mapping `SHAPE`/`HARMONY` APVTS macros into live audio output.
 - **[2026-04-17] Transition to Test-Driven DSP Development**: Replaced placeholder checks with waveform-accurate oscillator tests (shape boundaries at 0.0 and 0.5) and engine-level summing/prepare propagation tests, making DSP behavior verifiable by default before feature expansion.
 - **[2026-04-17] Monophonic MIDI Playability with Deterministic Phase Reset**: Added note-gated oscillator activation, `noteOn`/`noteOff` management in `RumbleEngine`, processor MIDI parsing (host + on-screen keyboard), deterministic phase reset on note start, and initial `GRIT` tanh soft-clipping with make-up normalization plus safe default master gain staging.
+- **[2026-04-17] Code-driven to GUI-driven Control**: Added a custom `BoutiqueLookAndFeel`, introduced five rotary APVTS-bound macro knobs (`PULSE`, `SHAPE`, `GRIT`, `GIRTH`, `HARMONY`), and laid out dashboard controls above the integrated MIDI keyboard for direct performance/UI workflow.
 
 ## The "Ant" Preferences
 - Focus on "Separation" and "Vibe" over clinical phase perfection.
