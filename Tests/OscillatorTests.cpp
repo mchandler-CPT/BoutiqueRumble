@@ -24,6 +24,7 @@ TEST_CASE("Oscillator shape 0.0 matches sine wave", "[oscillator][shape][determi
     osc.prepare(kSampleRate);
     osc.setFrequency(kFrequencyHz);
     osc.setShape(0.0f);
+    osc.setActive(true);
 
     for (int i = 0; i < kNumSamples; ++i)
     {
@@ -39,6 +40,7 @@ TEST_CASE("Oscillator shape 0.5 approaches square wave away from edges", "[oscil
     osc.prepare(kSampleRate);
     osc.setFrequency(kFrequencyHz);
     osc.setShape(0.5f);
+    osc.setActive(true);
 
     const float dt = kFrequencyHz / static_cast<float>(kSampleRate);
     int checkedSamples = 0;
@@ -61,4 +63,18 @@ TEST_CASE("Oscillator shape 0.5 approaches square wave away from edges", "[oscil
     }
 
     REQUIRE(checkedSamples > (kNumSamples / 2));
+}
+
+TEST_CASE("Inactive oscillator returns silence", "[oscillator][boundary]")
+{
+    Oscillator osc;
+    osc.prepare(kSampleRate);
+    osc.setFrequency(kFrequencyHz);
+    osc.setShape(0.0f);
+    osc.setActive(false);
+
+    for (int i = 0; i < 16; ++i)
+    {
+        REQUIRE(osc.getNextSample() == 0.0f);
+    }
 }

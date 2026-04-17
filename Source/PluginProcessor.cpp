@@ -15,6 +15,7 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
 {
     shapeParam = apvts.getRawParameterValue(IDs::shape);
     harmonyParam = apvts.getRawParameterValue(IDs::harmony);
+    gritParam = apvts.getRawParameterValue(IDs::grit);
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -131,7 +132,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
 void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    juce::ignoreUnused (midiMessages);
+    keyboardState.processNextMidiBuffer(midiMessages, 0, buffer.getNumSamples(), true);
 
     for (int channel = getTotalNumInputChannels(); channel < getTotalNumOutputChannels(); ++channel)
     {
@@ -140,9 +141,24 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
     const float shape = (shapeParam != nullptr) ? shapeParam->load() : 0.0f;
     const float harmony = (harmonyParam != nullptr) ? harmonyParam->load() : 0.0f;
+    const float grit = (gritParam != nullptr) ? gritParam->load() : 0.0f;
+
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+        if (message.isNoteOn())
+        {
+            rumbleEngine.noteOn(message.getNoteNumber(), message.getFloatVelocity());
+        }
+        else if (message.isNoteOff() || message.isAllNotesOff() || message.isAllSoundOff())
+        {
+            rumbleEngine.noteOff();
+        }
+    }
 
     rumbleEngine.setShape(shape);
     rumbleEngine.setHarmony(harmony);
+    rumbleEngine.setGrit(grit);
     rumbleEngine.process(buffer);
 }
 

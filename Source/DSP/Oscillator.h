@@ -18,6 +18,16 @@ public:
         updatePhaseIncrement();
     }
 
+    void resetPhase() noexcept
+    {
+        phase = 0.0;
+    }
+
+    void setActive(bool shouldBeActive) noexcept
+    {
+        mIsActive = shouldBeActive;
+    }
+
     // 0.0 -> sine, 0.5 -> square, 1.0 -> saw
     void setShape(float newShape)
     {
@@ -26,6 +36,11 @@ public:
 
     float getNextSample()
     {
+        if (! mIsActive)
+        {
+            return 0.0f;
+        }
+
         const float t = static_cast<float>(phase);
         const float dt = static_cast<float>(phaseIncrement);
 
@@ -109,4 +124,5 @@ private:
     double phaseIncrement { 440.0 / 44100.0 };
     float frequencyHz { 440.0f };
     float shape { 0.0f };
+    bool mIsActive { false };
 };

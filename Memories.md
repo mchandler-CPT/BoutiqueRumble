@@ -13,10 +13,11 @@
 - **[2026-04-17] Testing Infrastructure**: Added `BoutiqueTests` executable via CMake `FetchContent` with Catch2 v3 and validated setup with a dummy arithmetic test.
 - **[2026-04-17] Functional Signal Path**: Transitioned from silent stubs to a working core path—Poly-BLEP morphing oscillator (sine/square/saw), 3-voice `RumbleEngine` (1 sub + 2 mids), and processor integration mapping `SHAPE`/`HARMONY` APVTS macros into live audio output.
 - **[2026-04-17] Transition to Test-Driven DSP Development**: Replaced placeholder checks with waveform-accurate oscillator tests (shape boundaries at 0.0 and 0.5) and engine-level summing/prepare propagation tests, making DSP behavior verifiable by default before feature expansion.
+- **[2026-04-17] Monophonic MIDI Playability with Deterministic Phase Reset**: Added note-gated oscillator activation, `noteOn`/`noteOff` management in `RumbleEngine`, processor MIDI parsing (host + on-screen keyboard), deterministic phase reset on note start, and initial `GRIT` tanh soft-clipping with make-up normalization plus safe default master gain staging.
 
 ## The "Ant" Preferences
 - Focus on "Separation" and "Vibe" over clinical phase perfection.
 - Support for "Sub-Drift" to create independent movement between the sub and mids.
 
 ## Current Technical Debt / Next Steps
-- Add note-triggered pitch handling so `RumbleEngine` follows incoming MIDI note frequency.
+- Improve monophonic MIDI handling to include legato/last-note-priority behavior instead of immediate global note-off.

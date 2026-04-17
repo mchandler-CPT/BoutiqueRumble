@@ -6,13 +6,14 @@ namespace
 {
 constexpr double kSampleRate = 48000.0;
 constexpr int kNumSamples = 256;
+constexpr int kMidiNote = 33; // A1 ~= 55 Hz
 constexpr float kShape = 0.25f;
 constexpr float kHarmony = 0.4f;
 constexpr float kEpsilon = 1.0e-4f;
 
 void configureReferenceOscillators(Oscillator& subOsc, Oscillator& midOscA, Oscillator& midOscB)
 {
-    constexpr float baseFrequencyHz = 55.0f;
+    const float baseFrequencyHz = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(kMidiNote));
     const float subFrequency = baseFrequencyHz * 0.5f;
     const float midAFrequency = baseFrequencyHz * (1.0f + kHarmony);
     const float midBFrequency = baseFrequencyHz * (1.5f + kHarmony * 1.5f);
@@ -24,6 +25,9 @@ void configureReferenceOscillators(Oscillator& subOsc, Oscillator& midOscA, Osci
     subOsc.setShape(kShape);
     midOscA.setShape(kShape);
     midOscB.setShape(kShape);
+    subOsc.setActive(true);
+    midOscA.setActive(true);
+    midOscB.setActive(true);
 
     subOsc.setFrequency(subFrequency);
     midOscA.setFrequency(midAFrequency);
@@ -48,6 +52,9 @@ TEST_CASE("RumbleEngine sums sub and mids deterministically", "[engine][sum][det
     engine.prepare(kSampleRate);
     engine.setShape(kShape);
     engine.setHarmony(kHarmony);
+    engine.setGrit(0.0f);
+    engine.setMasterGain(1.0f);
+    engine.noteOn(kMidiNote, 1.0f);
 
     Oscillator refSub;
     Oscillator refMidA;
@@ -67,5 +74,23 @@ TEST_CASE("RumbleEngine sums sub and mids deterministically", "[engine][sum][det
 
         REQUIRE(buffer.getSample(0, i) == Catch::Approx(expected).margin(kEpsilon));
         REQUIRE(buffer.getSample(1, i) == Catch::Approx(expected).margin(kEpsilon));
+    }
+}
+
+TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
+{
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.noteOn(kMidiNote, 1.0f);
+    engine.noteOff();
+
+    juce::AudioBuffer<float> buffer(2, 32);
+    buffer.clear();
+    engine.process(buffer);
+
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        REQUIRE(buffer.getSample(0, i) == Catch::Approx(0.0f).margin(kEpsilon));
+        REQUIRE(buffer.getSample(1, i) == Catch::Approx(0.0f).margin(kEpsilon));
     }
 }

@@ -9,6 +9,8 @@ public:
     BoutiqueRumbleAudioProcessor();
     ~BoutiqueRumbleAudioProcessor() override;
 
+    juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
+
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
 
@@ -41,7 +43,9 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BoutiqueRumbleAudioProcessor)
     juce::AudioProcessorValueTreeState apvts;
     RumbleEngine rumbleEngine;
+    juce::MidiKeyboardState keyboardState;
     std::atomic<float>* shapeParam { nullptr };
     std::atomic<float>* harmonyParam { nullptr };
+    std::atomic<float>* gritParam { nullptr };
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 };
