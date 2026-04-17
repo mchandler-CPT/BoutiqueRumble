@@ -56,10 +56,15 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(BoutiqueTests
     Tests/OscillatorTests.cpp
+    Tests/EngineTests.cpp
 )
+
+target_include_directories(BoutiqueTests PRIVATE Source)
 
 target_link_libraries(BoutiqueTests PRIVATE
     Catch2::Catch2WithMain
+    juce::juce_core
+    juce::juce_audio_basics
 )
 
 target_compile_features(BoutiqueTests PRIVATE cxx_std_20)

@@ -42,3 +42,12 @@ Strictly adhere to the following directory hierarchy:
     2. Document any "gotchas" or bugs encountered (e.g., the VST3 compatibility error).
     3. Note any specific preferences of the user (e.g., Ant's preference for 'Sub-Drift' or 'Phase Offset').
 - Before starting a new complex task, read `MEMORIES.md` to ensure continuity.
+
+## 6. Testing Protocol (Strict)
+- Every new DSP class or utility must have a corresponding test file in `Tests/`.
+- Before implementing a new feature, draft a "Skeleton Test" to define the expected behavior.
+- Ensure all tests pass (`ctest`) before declaring a task "Complete."
+- Focus tests on:
+    - Determinism (Same input = Same output).
+    - Phase Alignment (Critical for the 'Rumble' aesthetic).
+    - Boundary Conditions (Knob at 0.0 vs 1.0).

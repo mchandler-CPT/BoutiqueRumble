@@ -1,5 +1,6 @@
 #pragma once
-#include <JuceHeader.h>
+#include <juce_core/juce_core.h>
+#include <cmath>
 
 class Oscillator {
 public:
@@ -42,6 +43,11 @@ public:
 
         advancePhase();
         return result;
+    }
+
+    double getSampleRateForTests() const noexcept
+    {
+        return sampleRateHz;
     }
 
 private:

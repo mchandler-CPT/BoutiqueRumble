@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+#include <juce_audio_basics/juce_audio_basics.h>
 #include "Oscillator.h"
 
 class RumbleEngine {
@@ -53,6 +55,15 @@ public:
                 buffer.setSample(channel, sample, mixed);
             }
         }
+    }
+
+    std::array<double, 3> getChildSampleRatesForTests() const noexcept
+    {
+        return {
+            subOsc.getSampleRateForTests(),
+            midOscA.getSampleRateForTests(),
+            midOscB.getSampleRateForTests()
+        };
     }
 
 private:
