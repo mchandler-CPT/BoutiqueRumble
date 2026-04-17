@@ -80,3 +80,31 @@ TEST_CASE("Rate index maps to expected multipliers", "[slew][rate][mapping]")
     engine.setRate(4); // 1/8
     REQUIRE(engine.getRateMultiplierForTests() == Catch::Approx(2.0f).margin(1.0e-6f));
 }
+
+TEST_CASE("Girth 0 and Pulse 0.1 produce a sharp percussive ping", "[slew][lfo][pulse]")
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr double bpm = 120.0;
+
+    RumbleEngine engine;
+    engine.prepare(sampleRate);
+    engine.setRate(6); // 1/16
+    engine.setGirth(0.0f);
+    engine.setPulse(0.1f);
+    engine.setTransportInfo(bpm, 0.0, true, false);
+    engine.noteOn(36, 1.0f);
+
+    const int oneSixteenthSamples = static_cast<int>((60.0 / bpm / 4.0) * sampleRate);
+    const auto envelope = engine.renderGateEnvelopeForTests(oneSixteenthSamples);
+    const int quarterPoint = oneSixteenthSamples / 4;
+    const int midpoint = oneSixteenthSamples / 2;
+
+    float earlyPeak = 0.0f;
+    for (int i = 0; i < quarterPoint; ++i)
+    {
+        earlyPeak = juce::jmax(earlyPeak, envelope[i]);
+    }
+
+    REQUIRE(earlyPeak > 0.7f);
+    REQUIRE(envelope[midpoint] < 0.2f);
+}

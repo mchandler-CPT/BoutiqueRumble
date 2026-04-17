@@ -25,6 +25,7 @@
 - **[2026-04-17] Implementation of 5ms Linear Release De-Click**: Replaced immediate note-off muting with a sample-accurate 5ms linear release envelope (`mNoteGainEnvelope`) and deferred oscillator deactivation until fade completion, eliminating abrupt release pops while retaining CPU-saving voice shutdown.
 - **[2026-04-17] Digital Entropy + White Noise Tearing in GRIT Manifold**: Extended GRIT beyond saturation by mapping it to an internal entropy stage that adds post-0.5 bit reduction plus amplitude-tracked white-noise tearing before tanh, creating a more aggressive 'tear' texture while preserving level control and test coverage for noise-driven non-periodicity.
 - **[2026-04-17] Pushing GRIT to 3-bit destruction + LFO Morphing**: Increased high-GRIT crushing range to reach ~3-bit quantization at max, introduced kinked macro tapering for `SHAPE`/`GRIT` (quadratic low-half + steeper upper ramp), and morphed low-`PULSE` gating into smooth parabolic/sine sidechain swells that transition into square gating above the threshold.
+- **[2026-04-17] Transition to Morphable Rhythmic LFO (Sine/Triangle/Square)**: Updated the PULSE manifold to morph through ducking-sine -> triangle-pluck -> square gate regions while retaining slew smoothing, and added midpoint-curve verification to ensure low-pulse behavior is no longer a square plateau.
 
 ## The "Ant" Preferences
 - Focus on "Separation" and "Vibe" over clinical phase perfection.

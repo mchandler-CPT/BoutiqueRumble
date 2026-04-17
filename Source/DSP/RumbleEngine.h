@@ -361,19 +361,10 @@ private:
         }
 
         const float squareGate = gatePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
-        if (mPulse >= 0.4f)
-        {
-            return squareGate;
-        }
-
         const float phase = static_cast<float>(gatePhase);
         const float sineSwell = 0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi * phase);
-        const float x = phase * 2.0f - 1.0f;
-        const float parabolicSwell = juce::jmax(0.0f, 1.0f - x * x);
-        const float smoothSwell = 0.5f * (sineSwell + parabolicSwell);
-
-        const float morphToSquare = juce::jlimit(0.0f, 1.0f, mPulse / 0.4f);
-        return juce::jmap(morphToSquare, smoothSwell, squareGate);
+        const float girthMorph = juce::jlimit(0.0f, 1.0f, mGirth);
+        return juce::jmap(girthMorph, squareGate, sineSwell);
     }
 
     float advanceGate(double gatePhase)
