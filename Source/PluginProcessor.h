@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "DSP/RumbleEngine.h"
 
 class BoutiqueRumbleAudioProcessor final : public juce::AudioProcessor
 {
@@ -38,6 +39,9 @@ public:
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BoutiqueRumbleAudioProcessor)
-    juce::AudioProcessorValueTreeState apvts;    
+    juce::AudioProcessorValueTreeState apvts;
+    RumbleEngine rumbleEngine;
+    std::atomic<float>* shapeParam { nullptr };
+    std::atomic<float>* harmonyParam { nullptr };
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 };

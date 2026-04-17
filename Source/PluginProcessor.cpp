@@ -13,8 +13,8 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
        ),
        apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()) // The Handshake
 {
-    // Any initialization logic that doesn't belong in the header 
-    // initializer list goes here.
+    shapeParam = apvts.getRawParameterValue(IDs::shape);
+    harmonyParam = apvts.getRawParameterValue(IDs::harmony);
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -79,8 +79,10 @@ void BoutiqueRumbleAudioProcessor::changeProgramName (int, const juce::String&)
 {
 }
 
-void BoutiqueRumbleAudioProcessor::prepareToPlay (double, int)
+void BoutiqueRumbleAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    juce::ignoreUnused(samplesPerBlock);
+    rumbleEngine.prepare(sampleRate);
 }
 
 void BoutiqueRumbleAudioProcessor::releaseResources()
@@ -131,11 +133,17 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused (midiMessages);
 
-    for (int channel = 0; channel < getTotalNumOutputChannels(); ++channel)
+    for (int channel = getTotalNumInputChannels(); channel < getTotalNumOutputChannels(); ++channel)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-        juce::ignoreUnused (channelData);
+        buffer.clear(channel, 0, buffer.getNumSamples());
     }
+
+    const float shape = (shapeParam != nullptr) ? shapeParam->load() : 0.0f;
+    const float harmony = (harmonyParam != nullptr) ? harmonyParam->load() : 0.0f;
+
+    rumbleEngine.setShape(shape);
+    rumbleEngine.setHarmony(harmony);
+    rumbleEngine.process(buffer);
 }
 
 bool BoutiqueRumbleAudioProcessor::hasEditor() const
