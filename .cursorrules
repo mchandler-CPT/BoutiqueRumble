@@ -34,3 +34,11 @@ Strictly adhere to the following directory hierarchy:
 - Anti-aliasing: Use Poly-BLEP for non-sine oscillators.
 - Phase Management: Use deterministic Phase Resets on note-on to ensure sub-bass punch.
 - Filters: Prefer State Variable TPT filters for modulation stability.
+
+## 5. Memory & Context Management
+- Maintain a file in the root called `MEMORIES.md`.
+- After every significant task (e.g., refactoring the APVTS, setting up Catch2, implementing a new DSP module):
+    1. Summarize the architectural decision made.
+    2. Document any "gotchas" or bugs encountered (e.g., the VST3 compatibility error).
+    3. Note any specific preferences of the user (e.g., Ant's preference for 'Sub-Drift' or 'Phase Offset').
+- Before starting a new complex task, read `MEMORIES.md` to ensure continuity.

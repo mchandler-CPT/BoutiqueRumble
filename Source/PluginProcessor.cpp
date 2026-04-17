@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Parameters/ParamConstants.h"
 
 BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
      : AudioProcessor (BusesProperties()
@@ -116,11 +117,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
     // Mapping our research paper concepts to actual sliders
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("PULSE", "Pulse", 0.0f, 1.0f, 0.5f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("SHAPE", "Shape", 0.0f, 1.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("GRIT",  "Grit",  0.0f, 1.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("GIRTH", "Girth", 0.0f, 1.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("HARMONY", "Harmony", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::pulse, "Pulse", 0.0f, 1.0f, 0.5f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::shape, "Shape", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::grit, "Grit", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::girth, "Girth", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::harmony, "Harmony", 0.0f, 1.0f, 0.0f));
 
     return { params.begin(), params.end() };
 }

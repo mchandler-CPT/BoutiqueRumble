@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 
 project(BoutiqueRumble VERSION 1.0.0 LANGUAGES CXX)
 
+include(FetchContent)
+include(CTest)
+
 # 1. Point to your JUCE installation
 # If you copied JUCE into the folder, use add_subdirectory(JUCE)
 add_subdirectory("C:/Juce" JUCE) 
@@ -23,6 +26,7 @@ target_sources(BoutiqueRumble PRIVATE
     Source/PluginEditor.cpp
     Source/DSP/Oscillator.h
     Source/DSP/RumbleEngine.h
+    Source/Parameters/ParamConstants.h
 ) 
 
 target_include_directories(BoutiqueRumble PRIVATE Source)
@@ -41,3 +45,25 @@ target_link_libraries(BoutiqueRumble PRIVATE
 
 # 5. Professional Standards
 target_compile_features(BoutiqueRumble PRIVATE cxx_std_20)
+
+# 6. Test Infrastructure
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.5.4
+)
+FetchContent_MakeAvailable(Catch2)
+
+add_executable(BoutiqueTests
+    Tests/OscillatorTests.cpp
+)
+
+target_link_libraries(BoutiqueTests PRIVATE
+    Catch2::Catch2WithMain
+)
+
+target_compile_features(BoutiqueTests PRIVATE cxx_std_20)
+
+if (BUILD_TESTING)
+    add_test(NAME BoutiqueTests COMMAND BoutiqueTests)
+endif()
