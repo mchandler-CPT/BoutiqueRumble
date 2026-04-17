@@ -159,3 +159,34 @@ TEST_CASE("Low band remains mono regardless of GIRTH", "[engine][girth][crossove
         REQUIRE(rmsLeft == Catch::Approx(expectedRms).margin(rmsEpsilon));
     }
 }
+
+TEST_CASE("Max GRIT introduces entropy-driven non-periodic differences", "[engine][grit][entropy]")
+{
+    RumbleEngine engineA;
+    engineA.prepare(kSampleRate);
+    engineA.setGrit(1.0f);
+    engineA.setEntropySeedForTests(12345);
+    engineA.noteOn(kMidiNote, 1.0f);
+
+    RumbleEngine engineB;
+    engineB.prepare(kSampleRate);
+    engineB.setGrit(1.0f);
+    engineB.setEntropySeedForTests(98765);
+    engineB.noteOn(kMidiNote, 1.0f);
+
+    juce::AudioBuffer<float> bufferA(2, kNumSamples);
+    juce::AudioBuffer<float> bufferB(2, kNumSamples);
+    bufferA.clear();
+    bufferB.clear();
+    engineA.process(bufferA);
+    engineB.process(bufferB);
+
+    float differenceEnergy = 0.0f;
+    for (int i = 0; i < kNumSamples; ++i)
+    {
+        const float diff = bufferA.getSample(0, i) - bufferB.getSample(0, i);
+        differenceEnergy += diff * diff;
+    }
+
+    REQUIRE(differenceEnergy > 1.0e-4f);
+}

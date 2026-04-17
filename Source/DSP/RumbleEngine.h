@@ -3,6 +3,7 @@
 #include <cmath>
 #include <vector>
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_core/juce_core.h>
 #include <juce_dsp/juce_dsp.h>
 #include "Oscillator.h"
 #include "Utils/SlewLimiter.h"
@@ -47,6 +48,7 @@ public:
     void setGrit(float newGrit)
     {
         mGrit = juce::jlimit(0.0f, 1.0f, newGrit);
+        mEntropy = mGrit;
     }
 
     void setGirth(float newGirth)
@@ -150,7 +152,19 @@ public:
             const float midB = midOscB.getNextSample() * 0.2f;
             const float gate = advanceGate(gatePhase);
 
-            const float dry = (sub + midA + midB) * mMasterGain * mVelocity * gate;
+            const float oscillatorSample = (sub + midA + midB) * mMasterGain * mVelocity * gate;
+            float dry = oscillatorSample;
+
+            if (mEntropy > 0.5f)
+            {
+                const float entropyPhase = juce::jmap(mEntropy, 0.5f, 1.0f, 0.0f, 1.0f);
+                const float bits = juce::jmap(entropyPhase, 16.0f, 5.0f);
+                const float quantizationLevels = std::pow(2.0f, bits);
+                dry = std::round(dry * quantizationLevels) / quantizationLevels;
+            }
+
+            const float tear = (entropyRandom.nextFloat() * 2.0f - 1.0f) * std::abs(oscillatorSample) * mEntropy * 0.1f;
+            dry += tear;
 
             float mixed = dry;
             if (mGrit > 0.0001f)
@@ -212,6 +226,11 @@ public:
     float getRateMultiplierForTests() const noexcept
     {
         return mSubdivisionMultiplier;
+    }
+
+    void setEntropySeedForTests(int seed) noexcept
+    {
+        entropyRandom.setSeed(seed);
     }
 
     std::vector<float> renderGateEnvelopeForTests(int numSamples)
@@ -367,6 +386,7 @@ private:
     float mVelocity { 0.0f };
     float mMasterGain { 0.5f };
     float mGrit { 0.0f };
+    float mEntropy { 0.0f };
     float mGirth { 0.0f };
     float mPulse { 0.5f };
     float mGateDutyCycle { 0.55f };
@@ -392,6 +412,7 @@ private:
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> rightDecorrelator { 512 };
+    juce::Random entropyRandom;
 
     Oscillator subOsc;
     Oscillator midOscA;
