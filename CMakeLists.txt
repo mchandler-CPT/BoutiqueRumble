@@ -1,0 +1,39 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(BoutiqueRumble VERSION 1.0.0 LANGUAGES CXX)
+
+# 1. Point to your JUCE installation
+# If you copied JUCE into the folder, use add_subdirectory(JUCE)
+add_subdirectory("C:/Juce" JUCE) 
+
+# 2. Define the Plugin
+juce_add_plugin(BoutiqueRumble
+    COMPANY_NAME "SeniorArchitect"
+    IS_SYNTH TRUE
+    NEEDS_MIDI_INPUT TRUE
+    PLUGIN_CODE "Rumb"      # Unique 4-char ID
+    FORMATS VST3 Standalone 
+    PRODUCT_NAME "Boutique Rumble")
+
+juce_generate_juce_header(BoutiqueRumble)
+
+# 3. Add your Source files
+target_sources(BoutiqueRumble PRIVATE
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/Oscillator.h)    # We'll re-port this in a second
+
+# 4. Link the "Boutique" Ingredients
+# These modules are essential for the 'Grit' and 'Girth' logic
+target_link_libraries(BoutiqueRumble PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_dsp           # Needed for TPT Filters and Saturation
+    juce::juce_gui_basics)
+
+    target_compile_definitions(BoutiqueRumble PUBLIC 
+        JUCE_VST3_CAN_REPLACE_VST2=0
+    )
+
+# 5. Professional Standards
+target_compile_features(BoutiqueRumble PRIVATE cxx_std_20)

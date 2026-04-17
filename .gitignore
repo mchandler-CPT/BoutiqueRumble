@@ -1,0 +1,19 @@
+# CMake / Build
+build/
+bin/
+obj/
+out/
+CMakeSettings.json
+
+# IDEs
+.vs/
+.vscode/
+*.user
+*.suo
+
+# System
+.DS_Store
+Thumbs.db
+
+# JUCE Generated (We generate these via CMake, no need to track)
+JuceLibraryCode/
