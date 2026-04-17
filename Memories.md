@@ -18,6 +18,10 @@
 - **[2026-04-17] Rhythmic Gating + Slew-based Click Reduction**: Implemented host-synced 16th-note gating in `RumbleEngine` using transport BPM/PPQ, mapped `PULSE` to both gate duty cycle and slew softness, and added a dedicated `SlewLimiter` utility + verification test to ensure non-instant transitions.
 - **[2026-04-17] Internal Standalone Clock Fallback**: Added processor-level internal PPQ/BPM fallback when host transport is absent or stopped, continuously driving `RumbleEngine` gate sync in Standalone mode; also added an optional standalone-only `PULSE` influence (+/-10%) over internal tempo for playful rhythmic variation.
 - **[2026-04-17] Linkwitz-Riley Crossover + GIRTH Spatial Management**: Added a 150 Hz 24 dB/oct Linkwitz-Riley split (LP/HP per output channel), enforced mono low-band integrity, and applied GIRTH-driven mid/side widening to the high band before recombining for stable low-end with controllable stereo width.
+- **[2026-04-17] HARMONY Frequency Ratio Mapping**: Implemented ratio-driven harmonic/inharmonic mapping in `RumbleEngine` where Sub stays at base `f`, MidA/MidB move through `2f/4f` -> `3f/4f` -> metallic ratios `2.137f/3.1415f`; frequency updates remain phase-continuous via oscillator frequency updates without forced phase jumps.
+- **[2026-04-17] Transition to Variable Rhythmic Subdivisions**: Added a subdivision-aware gate clock path (`1/8`, `1/8T`, `1/16`), standalone BPM number-box control, and UI-driven division selector linked to `RumbleEngine::setSubdivision`, while keeping `PULSE` focused on duty + slew behavior and validating transition-rate changes in tests.
+- **[2026-04-17] Expansion to Boutique 6: Dedicated Discrete RATE Control**: Promoted rhythmic subdivision to an automatable APVTS macro (`RATE`) with ten musical divisions (`1/1`..`1/64`), mapped to engine clock multipliers (`0.25`..`16.0`), and upgraded the UI to a sixth hard-set rate control while preserving standalone BPM and existing pulse feel.
+- **[2026-04-17] UI Refinement (Rotary RATE) + High-Band Decorrelation**: Switched `RATE` from utility +/- buttons to a Boutique rotary drag control with discrete snapping via APVTS choice mapping, tightened six-knob centering, and added a short right-channel high-band delay decorrelator so GIRTH widening produces more audible stereo spread on full-range systems.
 
 ## The "Ant" Preferences
 - Focus on "Separation" and "Vibe" over clinical phase perfection.
@@ -25,3 +29,4 @@
 
 ## Current Technical Debt / Next Steps
 - Improve monophonic MIDI handling to include legato/last-note-priority behavior instead of immediate global note-off.
+- `Base 5` Macros are functionally complete.

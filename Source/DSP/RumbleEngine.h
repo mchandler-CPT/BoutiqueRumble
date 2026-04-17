@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cmath>
+#include <vector>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_dsp/juce_dsp.h>
 #include "Oscillator.h"
@@ -62,6 +63,17 @@ public:
         gateSlew.setRiseAndFallTimesMs(slewMs, slewMs);
     }
 
+    void setSubdivision(float multiplier)
+    {
+        mSubdivisionMultiplier = juce::jlimit(0.25f, 16.0f, multiplier);
+    }
+
+    void setRate(int index)
+    {
+        mRateIndex = juce::jlimit(0, 9, index);
+        mSubdivisionMultiplier = rateIndexToMultiplier(mRateIndex);
+    }
+
     void setMasterGain(float newMasterGain)
     {
         mMasterGain = juce::jmax(0.0f, newMasterGain);
@@ -120,8 +132,7 @@ public:
             const float sub = subOsc.getNextSample() * 0.6f;
             const float midA = midOscA.getNextSample() * 0.2f;
             const float midB = midOscB.getNextSample() * 0.2f;
-            const float gateTarget = getGateTarget(gatePhase);
-            const float gate = gateSlew.process(gateTarget);
+            const float gate = advanceGate(gatePhase);
 
             const float dry = (sub + midA + midB) * mMasterGain * mVelocity * gate;
 
@@ -175,7 +186,49 @@ public:
         return { inLeft, inRight };
     }
 
+    std::array<float, 3> getCurrentFrequenciesForTests() const noexcept
+    {
+        return { mSubFrequencyHz, mMidAFrequencyHz, mMidBFrequencyHz };
+    }
+
+    float getRateMultiplierForTests() const noexcept
+    {
+        return mSubdivisionMultiplier;
+    }
+
+    std::vector<float> renderGateEnvelopeForTests(int numSamples)
+    {
+        std::vector<float> envelope;
+        if (numSamples <= 0)
+        {
+            return envelope;
+        }
+
+        envelope.reserve(static_cast<size_t>(numSamples));
+        double gatePhase = getBlockStartGatePhase();
+        const double gatePhaseIncrement = getGatePhaseIncrement();
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            envelope.push_back(advanceGate(gatePhase));
+            gatePhase += gatePhaseIncrement;
+            if (gatePhase >= 1.0)
+            {
+                gatePhase -= std::floor(gatePhase);
+            }
+        }
+
+        mInternalGatePhase = gatePhase;
+        return envelope;
+    }
+
 private:
+    static float rateIndexToMultiplier(int index) noexcept
+    {
+        constexpr float multipliers[] { 0.25f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 16.0f };
+        return multipliers[juce::jlimit(0, 9, index)];
+    }
+
     void prepareCrossover()
     {
         juce::dsp::ProcessSpec spec {};
@@ -198,6 +251,10 @@ private:
             highPassFilter.setType(juce::dsp::LinkwitzRileyFilterType::highpass);
             highPassFilter.setCutoffFrequency(crossoverFrequencyHz);
         }
+
+        rightDecorrelator.reset();
+        rightDecorrelator.prepare(spec);
+        rightDecorrelator.setDelay(decorrelationDelaySamples());
     }
 
     void processSpatialFrame(float& inOutLeft, float& inOutRight)
@@ -218,6 +275,9 @@ private:
 
         const float lowMono = 0.5f * (lowLeft + lowRight);
 
+        rightDecorrelator.pushSample(0, highRight);
+        highRight = rightDecorrelator.popSample(0);
+
         const float mid = 0.5f * (highLeft + highRight);
         const float sideEnergy = std::abs(highLeft) + std::abs(highRight);
         const float sideWeight = juce::jlimit(0.0f, 1.0f, sideEnergy * 2.0f);
@@ -231,14 +291,14 @@ private:
 
     double getGatePhaseIncrement() const noexcept
     {
-        return ((mCurrentBpm / 60.0) * 4.0) / sampleRateHz;
+        return ((mCurrentBpm / 60.0) * static_cast<double>(mSubdivisionMultiplier)) / sampleRateHz;
     }
 
     double getBlockStartGatePhase() const noexcept
     {
         if (mHasHostPpq)
         {
-            return std::fmod(mCurrentPpqPosition * 4.0, 1.0);
+            return std::fmod(mCurrentPpqPosition * static_cast<double>(mSubdivisionMultiplier), 1.0);
         }
 
         return mInternalGatePhase;
@@ -254,15 +314,32 @@ private:
         return gatePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
     }
 
+    float advanceGate(double gatePhase)
+    {
+        return gateSlew.process(getGateTarget(gatePhase));
+    }
+
     void updateFrequencies()
     {
-        const float subFrequency = mBaseFrequencyHz * 0.5f;
-        const float midAFrequency = mBaseFrequencyHz * (1.0f + harmony);
-        const float midBFrequency = mBaseFrequencyHz * (1.5f + harmony * 1.5f);
+        const float midARatio = (harmony <= 0.5f)
+            ? juce::jmap(harmony, 0.0f, 0.5f, 2.0f, 3.0f)
+            : juce::jmap(harmony, 0.5f, 1.0f, 3.0f, 2.137f);
+        const float midBRatio = (harmony <= 0.5f)
+            ? 4.0f
+            : juce::jmap(harmony, 0.5f, 1.0f, 4.0f, 3.1415f);
 
-        subOsc.setFrequency(subFrequency);
-        midOscA.setFrequency(midAFrequency);
-        midOscB.setFrequency(midBFrequency);
+        mSubFrequencyHz = mBaseFrequencyHz;
+        mMidAFrequencyHz = mBaseFrequencyHz * midARatio;
+        mMidBFrequencyHz = mBaseFrequencyHz * midBRatio;
+
+        subOsc.setFrequency(mSubFrequencyHz);
+        midOscA.setFrequency(mMidAFrequencyHz);
+        midOscB.setFrequency(mMidBFrequencyHz);
+    }
+
+    float decorrelationDelaySamples() const noexcept
+    {
+        return static_cast<float>(sampleRateHz * (decorrelationDelayMs * 0.001));
     }
 
     double sampleRateHz { 44100.0 };
@@ -275,6 +352,11 @@ private:
     float mGirth { 0.0f };
     float mPulse { 0.5f };
     float mGateDutyCycle { 0.55f };
+    float mSubdivisionMultiplier { 4.0f };
+    int mRateIndex { 6 };
+    float mSubFrequencyHz { 55.0f };
+    float mMidAFrequencyHz { 110.0f };
+    float mMidBFrequencyHz { 220.0f };
 
     double mCurrentBpm { 120.0 };
     double mCurrentPpqPosition { 0.0 };
@@ -284,8 +366,10 @@ private:
 
     SlewLimiter gateSlew;
     static constexpr float crossoverFrequencyHz = 150.0f;
+    static constexpr float decorrelationDelayMs = 3.5f;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> rightDecorrelator { 512 };
 
     Oscillator subOsc;
     Oscillator midOscA;

@@ -11,6 +11,8 @@ public:
 
     juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
+    void setStandaloneClockBpm(double bpm) noexcept;
+    double getStandaloneClockBpm() const noexcept;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -50,7 +52,8 @@ private:
     std::atomic<float>* harmonyParam { nullptr };
     std::atomic<float>* gritParam { nullptr };
     std::atomic<float>* girthParam { nullptr };
+    std::atomic<float>* rateParam { nullptr };
     double mInternalPpq { 0.0 };
-    double mDefaultBpm { 120.0 };
+    std::atomic<double> mDefaultBpm { 120.0 };
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 };

@@ -7,4 +7,5 @@ namespace IDs {
     inline const juce::String grit    { "GRIT" };
     inline const juce::String girth   { "GIRTH" };
     inline const juce::String harmony { "HARMONY" };
+    inline const juce::String rate    { "RATE" };
 }

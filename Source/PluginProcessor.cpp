@@ -19,9 +19,20 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     harmonyParam = apvts.getRawParameterValue(IDs::harmony);
     gritParam = apvts.getRawParameterValue(IDs::grit);
     girthParam = apvts.getRawParameterValue(IDs::girth);
+    rateParam = apvts.getRawParameterValue(IDs::rate);
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
+
+void BoutiqueRumbleAudioProcessor::setStandaloneClockBpm(double bpm) noexcept
+{
+    mDefaultBpm.store(juce::jlimit(40.0, 220.0, bpm));
+}
+
+double BoutiqueRumbleAudioProcessor::getStandaloneClockBpm() const noexcept
+{
+    return mDefaultBpm.load();
+}
 
 const juce::String BoutiqueRumbleAudioProcessor::getName() const
 {
@@ -128,7 +139,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
     params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::shape, "Shape", 0.0f, 1.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::grit, "Grit", 0.0f, 1.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::girth, "Girth", 0.0f, 1.0f, 0.0f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::harmony, "Harmony", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::harmony, "Harmony", 0.0f, 1.0f, 0.5f));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        IDs::rate,
+        "Rate",
+        juce::StringArray { "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64" },
+        6));
 
     return { params.begin(), params.end() };
 }
@@ -148,8 +164,9 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float grit = (gritParam != nullptr) ? gritParam->load() : 0.0f;
     const float girth = (girthParam != nullptr) ? girthParam->load() : 0.0f;
     const float pulse = (pulseParam != nullptr) ? pulseParam->load() : 0.5f;
+    const int rateIndex = (rateParam != nullptr) ? juce::roundToInt(rateParam->load()) : 6;
 
-    double bpm = mDefaultBpm;
+    double bpm = mDefaultBpm.load();
     double ppqPosition = mInternalPpq;
     bool isPlaying = true;
     bool hasPpqPosition = true;
@@ -187,11 +204,12 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     {
         const double sampleRate = juce::jmax(1.0, getSampleRate());
         const double pulseAsDouble = static_cast<double>(pulse);
+        const double defaultBpm = mDefaultBpm.load();
 
        #if JucePlugin_Build_Standalone
-        const double internalBpm = mDefaultBpm * juce::jmap(pulseAsDouble, 0.0, 1.0, 0.9, 1.1);
+        const double internalBpm = defaultBpm * juce::jmap(pulseAsDouble, 0.0, 1.0, 0.9, 1.1);
        #else
-        const double internalBpm = mDefaultBpm;
+        const double internalBpm = defaultBpm;
        #endif
 
         const double quarterNotesPerSecond = internalBpm / 60.0;
@@ -231,6 +249,7 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     rumbleEngine.setGrit(grit);
     rumbleEngine.setGirth(girth);
     rumbleEngine.setPulse(pulse);
+    rumbleEngine.setRate(rateIndex);
     rumbleEngine.setTransportInfo(bpm, ppqPosition, isPlaying, hasPpqPosition);
     rumbleEngine.process(buffer);
 }

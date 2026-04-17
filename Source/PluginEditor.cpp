@@ -24,6 +24,22 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureSlider(gritSlider, "Grit");
     configureSlider(girthSlider, "Girth");
     configureSlider(harmonySlider, "Harmony");
+    configureSlider(rateSlider, "Rate");
+    rateSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    rateSlider.setRange(0.0, 9.0, 1.0);
+    rateSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 18);
+    rateSlider.setDoubleClickReturnValue(true, 6.0);
+    rateSlider.textFromValueFunction = [] (double value)
+    {
+        static const juce::String labels[] { "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64" };
+        return labels[juce::jlimit(0, 9, juce::roundToInt(value))];
+    };
+    rateSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        static const juce::StringArray labels { "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64" };
+        const int idx = labels.indexOf(text.trim());
+        return static_cast<double>(idx >= 0 ? idx : 6);
+    };
 
     auto configureLabel = [this] (juce::Label& label, const juce::String& text)
     {
@@ -38,6 +54,19 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureLabel(gritLabel, "GRIT");
     configureLabel(girthLabel, "GIRTH");
     configureLabel(harmonyLabel, "HARMONY");
+    configureLabel(rateLabel, "RATE");
+
+    configureLabel(bpmLabel, "BPM");
+    bpmBox.setSliderStyle(juce::Slider::IncDecButtons);
+    bpmBox.setIncDecButtonsMode(juce::Slider::incDecButtonsDraggable_AutoDirection);
+    bpmBox.setRange(40.0, 220.0, 1.0);
+    bpmBox.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 56, 18);
+    bpmBox.setValue(audioProcessor.getStandaloneClockBpm(), juce::dontSendNotification);
+    bpmBox.onValueChange = [this]
+    {
+        audioProcessor.setStandaloneClockBpm(bpmBox.getValue());
+    };
+    addAndMakeVisible(bpmBox);
 
     auto& apvts = audioProcessor.getAPVTS();
     pulseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::pulse, pulseSlider);
@@ -45,9 +74,21 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     gritAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::grit, gritSlider);
     girthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::girth, girthSlider);
     harmonyAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::harmony, harmonySlider);
+    rateAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::rate, rateSlider);
 
     addAndMakeVisible(keyboardComponent);
     keyboardComponent.setAvailableRange(36, 96);
+
+#if JucePlugin_Build_Standalone
+    bpmLabel.setVisible(true);
+    bpmBox.setVisible(true);
+    bpmBox.setEnabled(true);
+#else
+    bpmLabel.setVisible(false);
+    bpmBox.setVisible(false);
+    bpmBox.setEnabled(false);
+#endif
+
     setSize (700, 420);
 }
 
@@ -77,19 +118,35 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
 
     auto keyboardArea = bounds.removeFromBottom(88);
     keyboardComponent.setBounds(keyboardArea);
+    auto bottomControlArea = bounds.removeFromBottom(24);
 
     auto knobArea = bounds.reduced(6);
-    constexpr int knobCount = 5;
+    constexpr int knobCount = 6;
+    const int maxKnobRowWidth = 6 * 112;
+    if (knobArea.getWidth() > maxKnobRowWidth)
+    {
+        knobArea = knobArea.withSizeKeepingCentre(maxKnobRowWidth, knobArea.getHeight());
+    }
+
     const int knobWidth = knobArea.getWidth() / knobCount;
     const int knobSize = juce::jmin(knobWidth - 10, knobArea.getHeight());
 
-    juce::Slider* sliders[knobCount] = { &pulseSlider, &shapeSlider, &gritSlider, &girthSlider, &harmonySlider };
-    juce::Label* labels[knobCount] = { &pulseLabel, &shapeLabel, &gritLabel, &girthLabel, &harmonyLabel };
+    juce::Slider* sliders[knobCount] = { &pulseSlider, &shapeSlider, &gritSlider, &girthSlider, &harmonySlider, &rateSlider };
+    juce::Label* labels[knobCount] = { &pulseLabel, &shapeLabel, &gritLabel, &girthLabel, &harmonyLabel, &rateLabel };
     for (int i = 0; i < knobCount; ++i)
     {
         auto cell = knobArea.removeFromLeft(knobWidth);
         auto labelArea = cell.removeFromTop(20);
         labels[i]->setBounds(labelArea);
+
         sliders[i]->setBounds(cell.withSizeKeepingCentre(knobSize, knobSize));
     }
+
+#if JucePlugin_Build_Standalone
+    auto bpmArea = bottomControlArea.removeFromRight(140);
+    bpmLabel.setBounds(bpmArea.removeFromLeft(40));
+    bpmBox.setBounds(bpmArea.reduced(2, 2));
+#else
+    juce::ignoreUnused(bottomControlArea);
+#endif
 }

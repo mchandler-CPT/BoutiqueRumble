@@ -77,6 +77,23 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     }
 }
 
+TEST_CASE("Harmony 0 maps to 1:2:4 frequency ratios", "[engine][harmony][ratios]")
+{
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.setHarmony(0.0f);
+    engine.noteOn(kMidiNote, 1.0f);
+
+    const auto freqs = engine.getCurrentFrequenciesForTests();
+    REQUIRE(freqs[0] > 0.0f);
+
+    const float ratioA = freqs[1] / freqs[0];
+    const float ratioB = freqs[2] / freqs[0];
+
+    REQUIRE(ratioA == Catch::Approx(2.0f).margin(1.0e-6f));
+    REQUIRE(ratioB == Catch::Approx(4.0f).margin(1.0e-6f));
+}
+
 TEST_CASE("Low band remains mono regardless of GIRTH", "[engine][girth][crossover]")
 {
     constexpr int warmupSamples = 1024;
