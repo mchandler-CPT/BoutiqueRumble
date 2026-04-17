@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_dsp/juce_dsp.h>
 #include "Oscillator.h"
 #include "Utils/SlewLimiter.h"
 
@@ -22,6 +23,7 @@ public:
         setPulse(mPulse);
         gateSlew.prepare(sampleRateHz);
         gateSlew.reset(1.0f);
+        prepareCrossover();
         noteOff();
     }
 
@@ -43,6 +45,11 @@ public:
     void setGrit(float newGrit)
     {
         mGrit = juce::jlimit(0.0f, 1.0f, newGrit);
+    }
+
+    void setGirth(float newGirth)
+    {
+        mGirth = juce::jlimit(0.0f, 1.0f, newGirth);
     }
 
     void setPulse(float newPulse)
@@ -129,9 +136,18 @@ public:
 
             mixed = juce::jlimit(-1.0f, 1.0f, mixed);
 
-            for (int channel = 0; channel < numOutputChannels; ++channel)
+            float leftOut = mixed;
+            float rightOut = mixed;
+            processSpatialFrame(leftOut, rightOut);
+
+            buffer.setSample(0, sample, leftOut);
+            if (numOutputChannels > 1)
             {
-                buffer.setSample(channel, sample, mixed);
+                buffer.setSample(1, sample, rightOut);
+            }
+            for (int channel = 2; channel < numOutputChannels; ++channel)
+            {
+                buffer.setSample(channel, sample, 0.0f);
             }
 
             gatePhase += gatePhaseIncrement;
@@ -153,7 +169,66 @@ public:
         };
     }
 
+    std::array<float, 2> processSpatialFrameForTests(float inLeft, float inRight)
+    {
+        processSpatialFrame(inLeft, inRight);
+        return { inLeft, inRight };
+    }
+
 private:
+    void prepareCrossover()
+    {
+        juce::dsp::ProcessSpec spec {};
+        spec.sampleRate = sampleRateHz;
+        spec.maximumBlockSize = 2048;
+        spec.numChannels = 1;
+
+        for (auto& lowPassFilter : lowPassFilters)
+        {
+            lowPassFilter.reset();
+            lowPassFilter.prepare(spec);
+            lowPassFilter.setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
+            lowPassFilter.setCutoffFrequency(crossoverFrequencyHz);
+        }
+
+        for (auto& highPassFilter : highPassFilters)
+        {
+            highPassFilter.reset();
+            highPassFilter.prepare(spec);
+            highPassFilter.setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+            highPassFilter.setCutoffFrequency(crossoverFrequencyHz);
+        }
+    }
+
+    void processSpatialFrame(float& inOutLeft, float& inOutRight)
+    {
+        const float dryLeft = inOutLeft;
+        const float dryRight = inOutRight;
+
+        float lowLeft = 0.0f;
+        float lowRight = 0.0f;
+        float highLeft = 0.0f;
+        float highRight = 0.0f;
+        lowPassFilters[0].processSample(0, dryLeft, lowLeft, highLeft);
+        lowPassFilters[1].processSample(0, dryRight, lowRight, highRight);
+
+        // Keep explicit HP instances active in parallel per architecture request.
+        juce::ignoreUnused(highPassFilters[0].processSample(0, dryLeft));
+        juce::ignoreUnused(highPassFilters[1].processSample(0, dryRight));
+
+        const float lowMono = 0.5f * (lowLeft + lowRight);
+
+        const float mid = 0.5f * (highLeft + highRight);
+        const float sideEnergy = std::abs(highLeft) + std::abs(highRight);
+        const float sideWeight = juce::jlimit(0.0f, 1.0f, sideEnergy * 2.0f);
+        const float side = 0.5f * (highLeft - highRight) * (1.0f + mGirth) * sideWeight;
+        const float widenedLeft = mid + side;
+        const float widenedRight = mid - side;
+
+        inOutLeft = juce::jlimit(-1.0f, 1.0f, lowMono + widenedLeft);
+        inOutRight = juce::jlimit(-1.0f, 1.0f, lowMono + widenedRight);
+    }
+
     double getGatePhaseIncrement() const noexcept
     {
         return ((mCurrentBpm / 60.0) * 4.0) / sampleRateHz;
@@ -197,6 +272,7 @@ private:
     float mVelocity { 0.0f };
     float mMasterGain { 0.5f };
     float mGrit { 0.0f };
+    float mGirth { 0.0f };
     float mPulse { 0.5f };
     float mGateDutyCycle { 0.55f };
 
@@ -207,6 +283,9 @@ private:
     bool mHasHostPpq { false };
 
     SlewLimiter gateSlew;
+    static constexpr float crossoverFrequencyHz = 150.0f;
+    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
+    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
 
     Oscillator subOsc;
     Oscillator midOscA;

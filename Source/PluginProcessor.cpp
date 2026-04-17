@@ -18,6 +18,7 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     shapeParam = apvts.getRawParameterValue(IDs::shape);
     harmonyParam = apvts.getRawParameterValue(IDs::harmony);
     gritParam = apvts.getRawParameterValue(IDs::grit);
+    girthParam = apvts.getRawParameterValue(IDs::girth);
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -145,6 +146,7 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float shape = (shapeParam != nullptr) ? shapeParam->load() : 0.0f;
     const float harmony = (harmonyParam != nullptr) ? harmonyParam->load() : 0.0f;
     const float grit = (gritParam != nullptr) ? gritParam->load() : 0.0f;
+    const float girth = (girthParam != nullptr) ? girthParam->load() : 0.0f;
     const float pulse = (pulseParam != nullptr) ? pulseParam->load() : 0.5f;
 
     double bpm = mDefaultBpm;
@@ -227,6 +229,7 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     rumbleEngine.setShape(shape);
     rumbleEngine.setHarmony(harmony);
     rumbleEngine.setGrit(grit);
+    rumbleEngine.setGirth(girth);
     rumbleEngine.setPulse(pulse);
     rumbleEngine.setTransportInfo(bpm, ppqPosition, isPlaying, hasPpqPosition);
     rumbleEngine.process(buffer);

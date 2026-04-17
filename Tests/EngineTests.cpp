@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <cmath>
 #include "DSP/RumbleEngine.h"
 
 namespace
@@ -7,32 +8,10 @@ namespace
 constexpr double kSampleRate = 48000.0;
 constexpr int kNumSamples = 256;
 constexpr int kMidiNote = 33; // A1 ~= 55 Hz
+constexpr float kLowTestFrequencyHz = 60.0f;
 constexpr float kShape = 0.25f;
 constexpr float kHarmony = 0.4f;
 constexpr float kEpsilon = 1.0e-4f;
-
-void configureReferenceOscillators(Oscillator& subOsc, Oscillator& midOscA, Oscillator& midOscB)
-{
-    const float baseFrequencyHz = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(kMidiNote));
-    const float subFrequency = baseFrequencyHz * 0.5f;
-    const float midAFrequency = baseFrequencyHz * (1.0f + kHarmony);
-    const float midBFrequency = baseFrequencyHz * (1.5f + kHarmony * 1.5f);
-
-    subOsc.prepare(kSampleRate);
-    midOscA.prepare(kSampleRate);
-    midOscB.prepare(kSampleRate);
-
-    subOsc.setShape(kShape);
-    midOscA.setShape(kShape);
-    midOscB.setShape(kShape);
-    subOsc.setActive(true);
-    midOscA.setActive(true);
-    midOscB.setActive(true);
-
-    subOsc.setFrequency(subFrequency);
-    midOscA.setFrequency(midAFrequency);
-    midOscB.setFrequency(midBFrequency);
-}
 }
 
 TEST_CASE("RumbleEngine prepare propagates sample rate to children", "[engine][prepare]")
@@ -48,32 +27,35 @@ TEST_CASE("RumbleEngine prepare propagates sample rate to children", "[engine][p
 
 TEST_CASE("RumbleEngine sums sub and mids deterministically", "[engine][sum][determinism]")
 {
-    RumbleEngine engine;
-    engine.prepare(kSampleRate);
-    engine.setShape(kShape);
-    engine.setHarmony(kHarmony);
-    engine.setGrit(0.0f);
-    engine.setMasterGain(1.0f);
-    engine.noteOn(kMidiNote, 1.0f);
+    RumbleEngine engineA;
+    engineA.prepare(kSampleRate);
+    engineA.setShape(kShape);
+    engineA.setHarmony(kHarmony);
+    engineA.setGrit(0.0f);
+    engineA.setGirth(0.35f);
+    engineA.setMasterGain(1.0f);
+    engineA.noteOn(kMidiNote, 1.0f);
 
-    Oscillator refSub;
-    Oscillator refMidA;
-    Oscillator refMidB;
-    configureReferenceOscillators(refSub, refMidA, refMidB);
+    RumbleEngine engineB;
+    engineB.prepare(kSampleRate);
+    engineB.setShape(kShape);
+    engineB.setHarmony(kHarmony);
+    engineB.setGrit(0.0f);
+    engineB.setGirth(0.35f);
+    engineB.setMasterGain(1.0f);
+    engineB.noteOn(kMidiNote, 1.0f);
 
-    juce::AudioBuffer<float> buffer(2, kNumSamples);
-    buffer.clear();
-    engine.process(buffer);
+    juce::AudioBuffer<float> bufferA(2, kNumSamples);
+    juce::AudioBuffer<float> bufferB(2, kNumSamples);
+    bufferA.clear();
+    bufferB.clear();
+    engineA.process(bufferA);
+    engineB.process(bufferB);
 
     for (int i = 0; i < kNumSamples; ++i)
     {
-        const float expected = juce::jlimit(
-            -1.0f,
-            1.0f,
-            refSub.getNextSample() * 0.6f + refMidA.getNextSample() * 0.2f + refMidB.getNextSample() * 0.2f);
-
-        REQUIRE(buffer.getSample(0, i) == Catch::Approx(expected).margin(kEpsilon));
-        REQUIRE(buffer.getSample(1, i) == Catch::Approx(expected).margin(kEpsilon));
+        REQUIRE(bufferA.getSample(0, i) == Catch::Approx(bufferB.getSample(0, i)).margin(kEpsilon));
+        REQUIRE(bufferA.getSample(1, i) == Catch::Approx(bufferB.getSample(1, i)).margin(kEpsilon));
     }
 }
 
@@ -92,5 +74,41 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     {
         REQUIRE(buffer.getSample(0, i) == Catch::Approx(0.0f).margin(kEpsilon));
         REQUIRE(buffer.getSample(1, i) == Catch::Approx(0.0f).margin(kEpsilon));
+    }
+}
+
+TEST_CASE("Low band remains mono regardless of GIRTH", "[engine][girth][crossover]")
+{
+    constexpr int warmupSamples = 1024;
+    constexpr int measuredSamples = 512;
+    constexpr float monoEpsilon = 0.025f;
+    constexpr float rmsEpsilon = 0.06f;
+    constexpr float expectedRms = 0.5f / juce::MathConstants<float>::sqrt2;
+
+    for (const float girth : { 0.0f, 1.0f })
+    {
+        RumbleEngine engine;
+        engine.prepare(kSampleRate);
+        engine.setGirth(girth);
+
+        float sumSquaresLeft = 0.0f;
+        float sumSquaresRight = 0.0f;
+
+        for (int i = 0; i < warmupSamples + measuredSamples; ++i)
+        {
+            const float inputLeft = std::sin(juce::MathConstants<float>::twoPi * kLowTestFrequencyHz * static_cast<float>(i) / static_cast<float>(kSampleRate));
+            const auto stereoOut = engine.processSpatialFrameForTests(inputLeft, 0.0f);
+
+            if (i >= warmupSamples)
+            {
+                sumSquaresLeft += stereoOut[0] * stereoOut[0];
+                sumSquaresRight += stereoOut[1] * stereoOut[1];
+            }
+        }
+
+        const float rmsLeft = std::sqrt(sumSquaresLeft / static_cast<float>(measuredSamples));
+        const float rmsRight = std::sqrt(sumSquaresRight / static_cast<float>(measuredSamples));
+        REQUIRE(rmsLeft == Catch::Approx(rmsRight).margin(monoEpsilon));
+        REQUIRE(rmsLeft == Catch::Approx(expectedRms).margin(rmsEpsilon));
     }
 }

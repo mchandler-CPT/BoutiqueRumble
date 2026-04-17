@@ -69,6 +69,7 @@ target_link_libraries(BoutiqueTests PRIVATE
     Catch2::Catch2WithMain
     juce::juce_core
     juce::juce_audio_basics
+    juce::juce_dsp
 )
 
 target_compile_features(BoutiqueTests PRIVATE cxx_std_20)
