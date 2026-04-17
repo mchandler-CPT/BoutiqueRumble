@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Parameters/ParamConstants.h"
+#include <algorithm>
 #include <cmath>
 
 BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
@@ -98,6 +99,7 @@ void BoutiqueRumbleAudioProcessor::prepareToPlay (double sampleRate, int samples
 {
     juce::ignoreUnused(samplesPerBlock);
     mInternalPpq = 0.0;
+    mActiveNotes.clear();
     rumbleEngine.prepare(sampleRate);
 }
 
@@ -236,10 +238,28 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         const auto message = metadata.getMessage();
         if (message.isNoteOn())
         {
-            rumbleEngine.noteOn(message.getNoteNumber(), message.getFloatVelocity());
+            const int noteNumber = message.getNoteNumber();
+            mActiveNotes.erase(std::remove(mActiveNotes.begin(), mActiveNotes.end(), noteNumber), mActiveNotes.end());
+            mActiveNotes.push_back(noteNumber);
+            rumbleEngine.noteOn(noteNumber, message.getFloatVelocity());
         }
-        else if (message.isNoteOff() || message.isAllNotesOff() || message.isAllSoundOff())
+        else if (message.isNoteOff())
         {
+            const int noteNumber = message.getNoteNumber();
+            mActiveNotes.erase(std::remove(mActiveNotes.begin(), mActiveNotes.end(), noteNumber), mActiveNotes.end());
+
+            if (! mActiveNotes.empty())
+            {
+                rumbleEngine.noteOn(mActiveNotes.back(), 1.0f);
+            }
+            else
+            {
+                rumbleEngine.noteOff();
+            }
+        }
+        else if (message.isAllNotesOff() || message.isAllSoundOff())
+        {
+            mActiveNotes.clear();
             rumbleEngine.noteOff();
         }
     }

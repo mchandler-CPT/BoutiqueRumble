@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <algorithm>
 #include <cmath>
 #include <unordered_set>
 #include "DSP/RumbleEngine.h"
@@ -229,4 +230,56 @@ TEST_CASE("Max GRIT reduces effective sample value resolution", "[engine][grit][
 
     REQUIRE(cleanUnique > 1000);
     REQUIRE(crushedUnique < cleanUnique / 3);
+}
+
+TEST_CASE("Monophonic note stack keeps newest note after older release", "[engine][midi][legato]")
+{
+    constexpr int noteA = 45;
+    constexpr int noteB = 52;
+
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.setGrit(0.0f);
+    engine.setGirth(0.0f);
+    engine.setPulse(0.5f);
+    engine.setRate(6);
+    engine.setTransportInfo(120.0, 0.0, true, false);
+
+    std::vector<int> activeNotes;
+
+    auto handleNoteOn = [&] (int noteNumber)
+    {
+        activeNotes.erase(std::remove(activeNotes.begin(), activeNotes.end(), noteNumber), activeNotes.end());
+        activeNotes.push_back(noteNumber);
+        engine.noteOn(noteNumber, 1.0f);
+    };
+
+    auto handleNoteOff = [&] (int noteNumber)
+    {
+        activeNotes.erase(std::remove(activeNotes.begin(), activeNotes.end(), noteNumber), activeNotes.end());
+        if (! activeNotes.empty())
+        {
+            engine.noteOn(activeNotes.back(), 1.0f);
+        }
+        else
+        {
+            engine.noteOff();
+        }
+    };
+
+    handleNoteOn(noteA);
+    handleNoteOn(noteB);
+    handleNoteOff(noteA);
+
+    juce::AudioBuffer<float> buffer(2, kNumSamples);
+    buffer.clear();
+    engine.process(buffer);
+
+    float peak = 0.0f;
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        peak = juce::jmax(peak, std::abs(buffer.getSample(0, i)));
+    }
+
+    REQUIRE(peak > 1.0e-4f);
 }
