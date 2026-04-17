@@ -45,8 +45,11 @@ private:
     juce::AudioProcessorValueTreeState apvts;
     RumbleEngine rumbleEngine;
     juce::MidiKeyboardState keyboardState;
+    std::atomic<float>* pulseParam { nullptr };
     std::atomic<float>* shapeParam { nullptr };
     std::atomic<float>* harmonyParam { nullptr };
     std::atomic<float>* gritParam { nullptr };
+    double mInternalPpq { 0.0 };
+    double mDefaultBpm { 120.0 };
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 };

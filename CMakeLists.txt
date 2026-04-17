@@ -27,6 +27,7 @@ target_sources(BoutiqueRumble PRIVATE
     Source/DSP/Oscillator.h
     Source/DSP/RumbleEngine.h
     Source/Parameters/ParamConstants.h
+    Source/Utils/SlewLimiter.h
     Source/UI/BoutiqueLookAndFeel.cpp
     Source/UI/BoutiqueLookAndFeel.h
 ) 
@@ -59,6 +60,7 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(BoutiqueTests
     Tests/OscillatorTests.cpp
     Tests/EngineTests.cpp
+    Tests/SlewTests.cpp
 )
 
 target_include_directories(BoutiqueTests PRIVATE Source)

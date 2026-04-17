@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Parameters/ParamConstants.h"
+#include <cmath>
 
 BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
      : AudioProcessor (BusesProperties()
@@ -13,6 +14,7 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
        ),
        apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()) // The Handshake
 {
+    pulseParam = apvts.getRawParameterValue(IDs::pulse);
     shapeParam = apvts.getRawParameterValue(IDs::shape);
     harmonyParam = apvts.getRawParameterValue(IDs::harmony);
     gritParam = apvts.getRawParameterValue(IDs::grit);
@@ -83,6 +85,7 @@ void BoutiqueRumbleAudioProcessor::changeProgramName (int, const juce::String&)
 void BoutiqueRumbleAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused(samplesPerBlock);
+    mInternalPpq = 0.0;
     rumbleEngine.prepare(sampleRate);
 }
 
@@ -142,6 +145,71 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float shape = (shapeParam != nullptr) ? shapeParam->load() : 0.0f;
     const float harmony = (harmonyParam != nullptr) ? harmonyParam->load() : 0.0f;
     const float grit = (gritParam != nullptr) ? gritParam->load() : 0.0f;
+    const float pulse = (pulseParam != nullptr) ? pulseParam->load() : 0.5f;
+
+    double bpm = mDefaultBpm;
+    double ppqPosition = mInternalPpq;
+    bool isPlaying = true;
+    bool hasPpqPosition = true;
+    bool usingHostClock = false;
+
+    if (auto* playHead = getPlayHead())
+    {
+        if (const auto position = playHead->getPosition())
+        {
+            const bool hostIsPlaying = position->getIsPlaying();
+            if (hostIsPlaying)
+            {
+                usingHostClock = true;
+                isPlaying = true;
+
+                if (const auto hostBpm = position->getBpm())
+                {
+                    bpm = *hostBpm;
+                }
+
+                if (const auto hostPpqPosition = position->getPpqPosition())
+                {
+                    ppqPosition = *hostPpqPosition;
+                    hasPpqPosition = true;
+                }
+                else
+                {
+                    hasPpqPosition = false;
+                }
+            }
+        }
+    }
+
+    if (! usingHostClock)
+    {
+        const double sampleRate = juce::jmax(1.0, getSampleRate());
+        const double pulseAsDouble = static_cast<double>(pulse);
+
+       #if JucePlugin_Build_Standalone
+        const double internalBpm = mDefaultBpm * juce::jmap(pulseAsDouble, 0.0, 1.0, 0.9, 1.1);
+       #else
+        const double internalBpm = mDefaultBpm;
+       #endif
+
+        const double quarterNotesPerSecond = internalBpm / 60.0;
+        const double blockIncrement = (static_cast<double>(buffer.getNumSamples()) / sampleRate) * quarterNotesPerSecond;
+
+        bpm = internalBpm;
+        ppqPosition = mInternalPpq;
+        hasPpqPosition = true;
+        isPlaying = true;
+
+        mInternalPpq += blockIncrement;
+        if (mInternalPpq > 100000.0)
+        {
+            mInternalPpq = std::fmod(mInternalPpq, 64.0);
+        }
+    }
+    else
+    {
+        mInternalPpq = ppqPosition;
+    }
 
     for (const auto metadata : midiMessages)
     {
@@ -159,6 +227,8 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     rumbleEngine.setShape(shape);
     rumbleEngine.setHarmony(harmony);
     rumbleEngine.setGrit(grit);
+    rumbleEngine.setPulse(pulse);
+    rumbleEngine.setTransportInfo(bpm, ppqPosition, isPlaying, hasPpqPosition);
     rumbleEngine.process(buffer);
 }
 
