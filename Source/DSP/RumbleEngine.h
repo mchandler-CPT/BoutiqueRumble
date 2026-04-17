@@ -33,10 +33,11 @@ public:
     void setShape(float newShape)
     {
         shape = juce::jlimit(0.0f, 1.0f, newShape);
+        mShapedShape = applyKinkedMacroTaper(shape);
 
-        subOsc.setShape(shape);
-        midOscA.setShape(shape);
-        midOscB.setShape(shape);
+        subOsc.setShape(mShapedShape);
+        midOscA.setShape(mShapedShape);
+        midOscB.setShape(mShapedShape);
     }
 
     void setHarmony(float newHarmony)
@@ -48,7 +49,8 @@ public:
     void setGrit(float newGrit)
     {
         mGrit = juce::jlimit(0.0f, 1.0f, newGrit);
-        mEntropy = mGrit;
+        mShapedGrit = applyKinkedMacroTaper(mGrit);
+        mEntropy = mShapedGrit;
     }
 
     void setGirth(float newGirth)
@@ -153,27 +155,7 @@ public:
             const float gate = advanceGate(gatePhase);
 
             const float oscillatorSample = (sub + midA + midB) * mMasterGain * mVelocity * gate;
-            float dry = oscillatorSample;
-
-            if (mEntropy > 0.5f)
-            {
-                const float entropyPhase = juce::jmap(mEntropy, 0.5f, 1.0f, 0.0f, 1.0f);
-                const float bits = juce::jmap(entropyPhase, 16.0f, 5.0f);
-                const float quantizationLevels = std::pow(2.0f, bits);
-                dry = std::round(dry * quantizationLevels) / quantizationLevels;
-            }
-
-            const float tear = (entropyRandom.nextFloat() * 2.0f - 1.0f) * std::abs(oscillatorSample) * mEntropy * 0.1f;
-            dry += tear;
-
-            float mixed = dry;
-            if (mGrit > 0.0001f)
-            {
-                const float drive = 1.0f + mGrit * 8.0f;
-                const float clipped = std::tanh(dry * drive);
-                const float makeUpGain = 1.0f / juce::jmax(0.05f, std::tanh(drive));
-                mixed = clipped * makeUpGain;
-            }
+            float mixed = applyGritManifold(oscillatorSample);
 
             mixed = juce::jlimit(-1.0f, 1.0f, mixed);
 
@@ -259,7 +241,37 @@ public:
         return envelope;
     }
 
+    std::vector<float> renderGritManifoldForTests(int numSamples, float frequencyHz)
+    {
+        std::vector<float> output;
+        if (numSamples <= 0)
+        {
+            return output;
+        }
+
+        output.reserve(static_cast<size_t>(numSamples));
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float phase = static_cast<float>(i) * frequencyHz / static_cast<float>(sampleRateHz);
+            const float oscillatorSample = std::sin(juce::MathConstants<float>::twoPi * std::fmod(phase, 1.0f));
+            output.push_back(applyGritManifold(oscillatorSample));
+        }
+
+        return output;
+    }
+
 private:
+    static float applyKinkedMacroTaper(float x) noexcept
+    {
+        const float clamped = juce::jlimit(0.0f, 1.0f, x);
+        if (clamped <= 0.5f)
+        {
+            return 2.0f * clamped * clamped;
+        }
+
+        return juce::jlimit(0.0f, 1.0f, 0.5f + (clamped - 0.5f) * 1.35f);
+    }
+
     static float rateIndexToMultiplier(int index) noexcept
     {
         constexpr float multipliers[] { 0.25f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 16.0f };
@@ -348,12 +360,50 @@ private:
             return 1.0f;
         }
 
-        return gatePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
+        const float squareGate = gatePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
+        if (mPulse >= 0.4f)
+        {
+            return squareGate;
+        }
+
+        const float phase = static_cast<float>(gatePhase);
+        const float sineSwell = 0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi * phase);
+        const float x = phase * 2.0f - 1.0f;
+        const float parabolicSwell = juce::jmax(0.0f, 1.0f - x * x);
+        const float smoothSwell = 0.5f * (sineSwell + parabolicSwell);
+
+        const float morphToSquare = juce::jlimit(0.0f, 1.0f, mPulse / 0.4f);
+        return juce::jmap(morphToSquare, smoothSwell, squareGate);
     }
 
     float advanceGate(double gatePhase)
     {
         return gateSlew.process(getGateTarget(gatePhase));
+    }
+
+    float applyGritManifold(float oscillatorSample)
+    {
+        float processed = oscillatorSample;
+
+        const float tear = (entropyRandom.nextFloat() * 2.0f - 1.0f) * std::abs(oscillatorSample) * mEntropy * 0.1f;
+        processed += tear;
+
+        if (mEntropy > 0.5f)
+        {
+            const float bits = juce::jmap(mEntropy, 0.5f, 1.0f, 12.0f, 3.0f);
+            const float quantizationLevels = std::pow(2.0f, bits);
+            processed = std::round(processed * quantizationLevels) / quantizationLevels;
+        }
+
+        if (mShapedGrit > 0.0001f)
+        {
+            const float drive = 1.0f + mShapedGrit * 8.0f;
+            const float clipped = std::tanh(processed * drive);
+            const float makeUpGain = 1.0f / juce::jmax(0.05f, std::tanh(drive));
+            processed = clipped * makeUpGain;
+        }
+
+        return processed;
     }
 
     void updateFrequencies()
@@ -386,7 +436,9 @@ private:
     float mVelocity { 0.0f };
     float mMasterGain { 0.5f };
     float mGrit { 0.0f };
+    float mShapedGrit { 0.0f };
     float mEntropy { 0.0f };
+    float mShapedShape { 0.0f };
     float mGirth { 0.0f };
     float mPulse { 0.5f };
     float mGateDutyCycle { 0.55f };

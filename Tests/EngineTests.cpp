@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <cmath>
+#include <unordered_set>
 #include "DSP/RumbleEngine.h"
 
 namespace
@@ -189,4 +190,43 @@ TEST_CASE("Max GRIT introduces entropy-driven non-periodic differences", "[engin
     }
 
     REQUIRE(differenceEnergy > 1.0e-4f);
+}
+
+TEST_CASE("Max GRIT reduces effective sample value resolution", "[engine][grit][bitcrush]")
+{
+    constexpr int oneSecondSamples = static_cast<int>(kSampleRate);
+    constexpr double quantizeScale = 1000000.0;
+    constexpr float testFrequencyHz = 110.0f;
+
+    auto countUniqueQuantized = [quantizeScale] (const std::vector<float>& signal)
+    {
+        std::unordered_set<int> values;
+        values.reserve(signal.size());
+        for (const float sample : signal)
+        {
+            values.insert(juce::roundToInt(sample * quantizeScale));
+        }
+        return static_cast<int>(values.size());
+    };
+
+    RumbleEngine cleanEngine;
+    cleanEngine.prepare(kSampleRate);
+    cleanEngine.setShape(0.0f); // sine-like source.
+    cleanEngine.setGrit(0.0f);
+    cleanEngine.setEntropySeedForTests(1111);
+
+    RumbleEngine crushedEngine;
+    crushedEngine.prepare(kSampleRate);
+    crushedEngine.setShape(0.0f);
+    crushedEngine.setGrit(1.0f);
+    crushedEngine.setEntropySeedForTests(1111);
+
+    const auto clean = cleanEngine.renderGritManifoldForTests(oneSecondSamples, testFrequencyHz);
+    const auto crushed = crushedEngine.renderGritManifoldForTests(oneSecondSamples, testFrequencyHz);
+
+    const int cleanUnique = countUniqueQuantized(clean);
+    const int crushedUnique = countUniqueQuantized(crushed);
+
+    REQUIRE(cleanUnique > 1000);
+    REQUIRE(crushedUnique < cleanUnique / 3);
 }
