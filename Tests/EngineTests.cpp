@@ -62,19 +62,49 @@ TEST_CASE("RumbleEngine sums sub and mids deterministically", "[engine][sum][det
 TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
 {
     RumbleEngine engine;
-    engine.prepare(kSampleRate);
+    constexpr double releaseSampleRate = 44100.0;
+    engine.prepare(releaseSampleRate);
     engine.noteOn(kMidiNote, 1.0f);
+
+    juce::AudioBuffer<float> preBuffer(2, 64);
+    preBuffer.clear();
+    engine.process(preBuffer);
+
     engine.noteOff();
 
-    juce::AudioBuffer<float> buffer(2, 32);
+    juce::AudioBuffer<float> buffer(2, 320);
     buffer.clear();
     engine.process(buffer);
 
+    float earlyPeak = 0.0f;
+    for (int i = 0; i < 40; ++i)
+    {
+        earlyPeak = juce::jmax(earlyPeak, std::abs(buffer.getSample(0, i)));
+    }
+    REQUIRE(earlyPeak > 1.0e-4f);
+
+    int silenceStartSample = -1;
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
-        REQUIRE(buffer.getSample(0, i) == Catch::Approx(0.0f).margin(kEpsilon));
-        REQUIRE(buffer.getSample(1, i) == Catch::Approx(0.0f).margin(kEpsilon));
+        bool remainingSilent = true;
+        for (int j = i; j < buffer.getNumSamples(); ++j)
+        {
+            if (std::abs(buffer.getSample(0, j)) > 1.0e-6f || std::abs(buffer.getSample(1, j)) > 1.0e-6f)
+            {
+                remainingSilent = false;
+                break;
+            }
+        }
+
+        if (remainingSilent)
+        {
+            silenceStartSample = i;
+            break;
+        }
     }
+
+    REQUIRE(silenceStartSample >= 210);
+    REQUIRE(silenceStartSample <= 230);
 }
 
 TEST_CASE("Harmony 0 maps to 1:2:4 frequency ratios", "[engine][harmony][ratios]")

@@ -22,6 +22,7 @@
 - **[2026-04-17] Transition to Variable Rhythmic Subdivisions**: Added a subdivision-aware gate clock path (`1/8`, `1/8T`, `1/16`), standalone BPM number-box control, and UI-driven division selector linked to `RumbleEngine::setSubdivision`, while keeping `PULSE` focused on duty + slew behavior and validating transition-rate changes in tests.
 - **[2026-04-17] Expansion to Boutique 6: Dedicated Discrete RATE Control**: Promoted rhythmic subdivision to an automatable APVTS macro (`RATE`) with ten musical divisions (`1/1`..`1/64`), mapped to engine clock multipliers (`0.25`..`16.0`), and upgraded the UI to a sixth hard-set rate control while preserving standalone BPM and existing pulse feel.
 - **[2026-04-17] UI Refinement (Rotary RATE) + High-Band Decorrelation**: Switched `RATE` from utility +/- buttons to a Boutique rotary drag control with discrete snapping via APVTS choice mapping, tightened six-knob centering, and added a short right-channel high-band delay decorrelator so GIRTH widening produces more audible stereo spread on full-range systems.
+- **[2026-04-17] Implementation of 5ms Linear Release De-Click**: Replaced immediate note-off muting with a sample-accurate 5ms linear release envelope (`mNoteGainEnvelope`) and deferred oscillator deactivation until fade completion, eliminating abrupt release pops while retaining CPU-saving voice shutdown.
 
 ## The "Ant" Preferences
 - Focus on "Separation" and "Vibe" over clinical phase perfection.

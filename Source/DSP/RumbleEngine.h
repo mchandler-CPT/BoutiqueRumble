@@ -14,6 +14,7 @@ public:
     void prepare(double sampleRate)
     {
         sampleRateHz = juce::jmax(1.0, sampleRate);
+        mReleasePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
 
         subOsc.prepare(sampleRateHz);
         midOscA.prepare(sampleRateHz);
@@ -103,16 +104,15 @@ public:
         midOscA.setActive(true);
         midOscB.setActive(true);
 
+        mIsNoteSustaining = true;
+        mNoteGainEnvelope = 1.0f;
+
         gateSlew.reset(mIsTransportPlaying ? 0.0f : 1.0f);
     }
 
     void noteOff()
     {
-        mVelocity = 0.0f;
-        subOsc.setActive(false);
-        midOscA.setActive(false);
-        midOscB.setActive(false);
-        gateSlew.reset(0.0f);
+        mIsNoteSustaining = false;
     }
 
     void process(juce::AudioBuffer<float>& buffer)
@@ -129,6 +129,22 @@ public:
 
         for (int sample = 0; sample < numSamples; ++sample)
         {
+            if (mIsNoteSustaining)
+            {
+                mNoteGainEnvelope = 1.0f;
+            }
+            else if (mNoteGainEnvelope > 0.0f)
+            {
+                mNoteGainEnvelope = juce::jmax(0.0f, mNoteGainEnvelope - mReleasePerSample);
+                if (mNoteGainEnvelope <= 0.0f)
+                {
+                    mVelocity = 0.0f;
+                    subOsc.setActive(false);
+                    midOscA.setActive(false);
+                    midOscB.setActive(false);
+                }
+            }
+
             const float sub = subOsc.getNextSample() * 0.6f;
             const float midA = midOscA.getNextSample() * 0.2f;
             const float midB = midOscB.getNextSample() * 0.2f;
@@ -150,6 +166,8 @@ public:
             float leftOut = mixed;
             float rightOut = mixed;
             processSpatialFrame(leftOut, rightOut);
+            leftOut *= mNoteGainEnvelope;
+            rightOut *= mNoteGainEnvelope;
 
             buffer.setSample(0, sample, leftOut);
             if (numOutputChannels > 1)
@@ -357,6 +375,9 @@ private:
     float mSubFrequencyHz { 55.0f };
     float mMidAFrequencyHz { 110.0f };
     float mMidBFrequencyHz { 220.0f };
+    float mNoteGainEnvelope { 0.0f };
+    float mReleasePerSample { 1.0f };
+    bool mIsNoteSustaining { false };
 
     double mCurrentBpm { 120.0 };
     double mCurrentPpqPosition { 0.0 };
@@ -365,6 +386,7 @@ private:
     bool mHasHostPpq { false };
 
     SlewLimiter gateSlew;
+    static constexpr float releaseTimeSeconds = 0.005f;
     static constexpr float crossoverFrequencyHz = 150.0f;
     static constexpr float decorrelationDelayMs = 3.5f;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
