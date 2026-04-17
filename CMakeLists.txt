@@ -21,7 +21,11 @@ juce_generate_juce_header(BoutiqueRumble)
 target_sources(BoutiqueRumble PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
-    Source/Oscillator.h)    # We'll re-port this in a second
+    Source/DSP/Oscillator.h
+    Source/DSP/RumbleEngine.h
+) 
+
+target_include_directories(BoutiqueRumble PRIVATE Source)
 
 # 4. Link the "Boutique" Ingredients
 # These modules are essential for the 'Grit' and 'Girth' logic

@@ -3,14 +3,17 @@
 
 BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
      : AudioProcessor (BusesProperties()
-#if ! JucePlugin_IsMidiEffect
-#if ! JucePlugin_IsSynth
-                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-#endif
-                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-#endif
-                       )
+        #if ! JucePlugin_IsMidiEffect
+         #if ! JucePlugin_IsSynth
+           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
+         #endif
+           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+        #endif
+       ),
+       apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()) // The Handshake
 {
+    // Any initialization logic that doesn't belong in the header 
+    // initializer list goes here.
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -107,6 +110,20 @@ bool BoutiqueRumbleAudioProcessor::isBusesLayoutSupported (const BusesLayout& la
 #endif
 }
 #endif
+
+juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    // Mapping our research paper concepts to actual sliders
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("PULSE", "Pulse", 0.0f, 1.0f, 0.5f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("SHAPE", "Shape", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("GRIT",  "Grit",  0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("GIRTH", "Girth", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("HARMONY", "Harmony", 0.0f, 1.0f, 0.0f));
+
+    return { params.begin(), params.end() };
+}
 
 void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {

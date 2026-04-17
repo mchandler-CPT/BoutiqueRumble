@@ -1,0 +1,36 @@
+# Boutique Rumble Project Rules
+
+You are a Senior Audio DSP Architect building a "Boutique" synthesizer in JUCE 8. 
+The goal is a curated, high-character instrument based on the "Rumble" research paper.
+
+## 1. Project Structure
+Strictly adhere to the following directory hierarchy:
+- Source/DSP/: All signal processing (Oscillators, Filters, Engines).
+- Source/UI/: All GUI components (Custom LookAndFeel, Editors).
+- Source/Parameters/: APVTS layout and Parameter ID constants.
+- Source/Utils/: Mathematical helpers (Slew limiters, Entropy logic).
+
+## 2. Coding Standards
+- Language: C++20.
+- Framework: JUCE 8.
+- Class Names: PascalCase (e.g., `RumbleEngine`).
+- File Names: Match the primary class name (e.g., `Oscillator.h`).
+- Method Names: camelCase (e.g., `getNextSample`).
+- Variable Names: camelCase (e.g., `currentSampleRate`).
+- Member Variables: Prefix with 'm' or use trailing underscore (e.g., `mFrequency` or `frequency_`).
+
+## 3. Architecture Rules
+- Separation of Concerns: No DSP logic in `PluginProcessor.cpp`. Outsource it to `Source/DSP/`.
+- Parameter Management: Always use `juce::AudioProcessorValueTreeState` (APVTS).
+- Use `juce::dsp` module wherever possible (TPT filters, etc.).
+- Macro Architecture: Always map logic to the "Boutique 5" knobs:
+    1. PULSE (Rhythmic gating/slew)
+    2. SHAPE (Waveform morphing)
+    3. GRIT (Entropy/Saturation)
+    4. GIRTH (Phase/Stereo Width)
+    5. HARMONY (Frequency Ratios)
+
+## 4. DSP Specifics
+- Anti-aliasing: Use Poly-BLEP for non-sine oscillators.
+- Phase Management: Use deterministic Phase Resets on note-on to ensure sub-bass punch.
+- Filters: Prefer State Variable TPT filters for modulation stability.

@@ -38,4 +38,6 @@ public:
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BoutiqueRumbleAudioProcessor)
+    juce::AudioProcessorValueTreeState apvts;    
+    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 };
