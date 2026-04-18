@@ -26,6 +26,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureSlider(harmonySlider, "Harmony");
     configureSlider(rateSlider, "Rate");
     configureSlider(skipSlider, "Skip");
+    configureSlider(brakeSlider, "Brake");
     rateSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     rateSlider.setRange(0.0, 9.0, 1.0);
     rateSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 18);
@@ -57,6 +58,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureLabel(harmonyLabel, "HARMONY");
     configureLabel(rateLabel, "RATE");
     configureLabel(skipLabel, "SKIP");
+    configureLabel(brakeLabel, "BRAKE");
 
     configureLabel(bpmLabel, "BPM");
     bpmBox.setSliderStyle(juce::Slider::IncDecButtons);
@@ -78,6 +80,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     harmonyAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::harmony, harmonySlider);
     rateAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::rate, rateSlider);
     skipAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::skip_prob, skipSlider);
+    brakeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::brake, brakeSlider);
 
     addAndMakeVisible(keyboardComponent);
     keyboardComponent.setAvailableRange(36, 96);
@@ -92,7 +95,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     bpmBox.setEnabled(false);
 #endif
 
-    setSize (820, 420);
+    setSize (940, 420);
 }
 
 BoutiqueRumbleAudioProcessorEditor::~BoutiqueRumbleAudioProcessorEditor()
@@ -124,8 +127,8 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     auto bottomControlArea = bounds.removeFromBottom(24);
 
     auto knobArea = bounds.reduced(6);
-    constexpr int knobCount = 7;
-    const int maxKnobRowWidth = 7 * 112;
+    constexpr int knobCount = 8;
+    const int maxKnobRowWidth = 8 * 112;
     if (knobArea.getWidth() > maxKnobRowWidth)
     {
         knobArea = knobArea.withSizeKeepingCentre(maxKnobRowWidth, knobArea.getHeight());
@@ -134,8 +137,8 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     const int knobWidth = knobArea.getWidth() / knobCount;
     const int knobSize = juce::jmin(knobWidth - 10, knobArea.getHeight());
 
-    juce::Slider* sliders[knobCount] = { &pulseSlider, &shapeSlider, &gritSlider, &girthSlider, &harmonySlider, &rateSlider, &skipSlider };
-    juce::Label* labels[knobCount] = { &pulseLabel, &shapeLabel, &gritLabel, &girthLabel, &harmonyLabel, &rateLabel, &skipLabel };
+    juce::Slider* sliders[knobCount] = { &pulseSlider, &shapeSlider, &gritSlider, &girthSlider, &harmonySlider, &rateSlider, &skipSlider, &brakeSlider };
+    juce::Label* labels[knobCount] = { &pulseLabel, &shapeLabel, &gritLabel, &girthLabel, &harmonyLabel, &rateLabel, &skipLabel, &brakeLabel };
     for (int i = 0; i < knobCount; ++i)
     {
         auto cell = knobArea.removeFromLeft(knobWidth);

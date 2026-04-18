@@ -22,6 +22,8 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     girthParam = apvts.getRawParameterValue(IDs::girth);
     rateParam = apvts.getRawParameterValue(IDs::rate);
     skipParam = apvts.getRawParameterValue(IDs::skip_prob);
+    brakeParam = apvts.getRawParameterValue(IDs::brake);
+    rumbleEngine.setBrakeParameter(brakeParam);
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -149,6 +151,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
         juce::StringArray { "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64" },
         6));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::skip_prob, "SKIP", 0.0f, 1.0f, 0.2f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::brake, "BRAKE", 0.0f, 1.0f, 1.0f));
 
     return { params.begin(), params.end() };
 }

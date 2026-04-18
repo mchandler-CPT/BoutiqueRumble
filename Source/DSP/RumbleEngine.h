@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <vector>
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -17,6 +18,7 @@ public:
         sampleRateHz = juce::jmax(1.0, sampleRate);
         mRisePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * attackTimeSeconds));
         updateReleaseEnvelopeCoefficient();
+        updateThumpDecayCoefficient();
 
         subOsc.prepare(sampleRateHz);
         midOscA.prepare(sampleRateHz);
@@ -31,7 +33,7 @@ public:
         mMidBRatioSmoothed.setCurrentAndTargetValue(mMidBRatioTarget);
         mCurrentMidARatio = mMidARatioSmoothed.getCurrentValue();
         mCurrentMidBRatio = mMidBRatioSmoothed.getCurrentValue();
-        applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
+        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
         mShapeSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
         mShapeSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(shape));
         mGritSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
@@ -49,7 +51,16 @@ public:
         mCurrentStepIsSkipped = false;
         mSubDriftLfoTheta = {};
         mGateRetriggerDipSamplesRemaining = 0;
+        mThumpSemitones = 0.0f;
+        mBrakeSmoother.reset(sampleRateHz, brakeSmootherSeconds);
+        mBrakeSmoother.setCurrentAndTargetValue(1.0f);
+        mStallStutterPhase = 0.0f;
         noteOff();
+    }
+
+    void setBrakeParameter(std::atomic<float>* param) noexcept
+    {
+        mBrakeParameter = param;
     }
 
     void setShape(float newShape)
@@ -62,7 +73,7 @@ public:
     {
         harmony = juce::jlimit(0.0f, 1.0f, newHarmony);
         updateFrequencyRatios();
-        applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
+        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
     }
 
     void setGrit(float newGrit)
@@ -145,11 +156,16 @@ public:
         if (legatoRetrigger)
         {
             mGateRetriggerDipSamplesRemaining = juce::jmax(1, juce::roundToInt(sampleRateHz * gateRetriggerDipSeconds));
+            mThumpSemitones = juce::jmax(mThumpSemitones, thumpSemitoneLegato);
+        }
+        else
+        {
+            mThumpSemitones = thumpSemitoneFresh;
         }
 
         updateReleaseEnvelopeCoefficient();
         updateFrequencyRatios();
-        applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
+        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
 
         subOsc.setActive(true);
         midOscA.setActive(true);
@@ -179,6 +195,33 @@ public:
         {
             advanceSubDriftLfos();
 
+            const float brakeTarget = (mBrakeParameter != nullptr) ? mBrakeParameter->load() : 1.0f;
+            mBrakeSmoother.setTargetValue(juce::jlimit(0.0f, 1.0f, brakeTarget));
+            const float brakeIn = mBrakeSmoother.getNextValue();
+            const float brakeWarpX = (brakeIn - 0.5f) * 10.0f;
+            const float warpedBrake = 1.0f / (1.0f + std::exp(-brakeWarpX));
+
+            const float pitchMult = warpedBrake * warpedBrake * warpedBrake;
+            const float gainMult = brakeIn;
+
+            const float stutterIntensity = 1.0f - brakeIn;
+            const float oneMinusBrake = 1.0f - brakeIn;
+            const float stutterRateHz = stutterRateScale * std::pow(oneMinusBrake, stutterRatePower);
+
+            float rawStutterSquareWave = 1.0f;
+            if (stutterRateHz > 1.0e-9f)
+            {
+                mStallStutterPhase += stutterRateHz / static_cast<float>(sampleRateHz);
+                if (mStallStutterPhase >= 1.0f)
+                {
+                    mStallStutterPhase -= std::floor(mStallStutterPhase);
+                }
+
+                rawStutterSquareWave = (mStallStutterPhase < stutterSquareDuty) ? 1.0f : 0.0f;
+            }
+
+            const float brakeStutterGate = 1.0f - (stutterIntensity * (1.0f - rawStutterSquareWave));
+
             if (mIsNoteSustaining)
             {
                 mNoteGainEnvelope = juce::jmin(1.0f, mNoteGainEnvelope + mRisePerSample);
@@ -199,7 +242,20 @@ public:
             const float currentBaseFrequency = mCurrentFrequency.getNextValue();
             mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
             mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
-            applyCurrentBaseFrequency(currentBaseFrequency);
+            applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(currentBaseFrequency));
+            advanceThumpSemitoneDecay();
+
+            const float rawSubHz = mSubFrequencyHz * pitchMult;
+            float subHz = rawSubHz;
+            if (brakeIn > 0.0f)
+            {
+                subHz = juce::jmax(brakeFrequencyIdleFloorHz, rawSubHz);
+            }
+
+            const float brakeFreqScale = (rawSubHz > 1.0e-6f) ? (subHz / rawSubHz) : 0.0f;
+            subOsc.setFrequency(subHz);
+            midOscA.setFrequency(mMidAFrequencyHz * pitchMult * brakeFreqScale);
+            midOscB.setFrequency(mMidBFrequencyHz * pitchMult * brakeFreqScale);
             mShapedShape = mShapeSmoothed.getNextValue();
             mShapedGrit = mGritSmoothed.getNextValue();
             mEntropy = mShapedGrit;
@@ -210,10 +266,11 @@ public:
             const float sub = subOsc.getNextSample() * 0.6f;
             const float midA = midOscA.getNextSample() * 0.2f;
             const float midB = midOscB.getNextSample() * 0.2f;
-            const float gate = advanceGate(gatePhase);
+            const float pulseGateLfo = advanceGate(gatePhase);
+            const float pulseGate = pulseGateLfo * brakeStutterGate;
 
-            const float subMono = sub * mMasterGain * mVelocity * gate;
-            const float midMono = (midA + midB) * mMasterGain * mVelocity * gate;
+            const float subMono = sub * mMasterGain * mVelocity * pulseGate;
+            const float midMono = (midA + midB) * mMasterGain * mVelocity * pulseGate;
 
             float leftOut = applyGritManifold(midMono);
             float rightOut = leftOut;
@@ -222,6 +279,8 @@ public:
             rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
             leftOut *= mNoteGainEnvelope;
             rightOut *= mNoteGainEnvelope;
+            leftOut *= gainMult;
+            rightOut *= gainMult;
 
             if (mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
             {
@@ -353,10 +412,12 @@ public:
         trace.reserve(static_cast<size_t>(numSamples));
         for (int i = 0; i < numSamples; ++i)
         {
+            advanceSubDriftLfos();
             const float currentBase = mCurrentFrequency.getNextValue();
             mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
             mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
-            applyCurrentBaseFrequency(currentBase);
+            applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(currentBase));
+            advanceThumpSemitoneDecay();
             trace.push_back(mSubFrequencyHz);
         }
 
@@ -610,6 +671,31 @@ private:
         midOscB.setFrequency(mMidBFrequencyHz);
     }
 
+    float baseFrequencyWithThumpOffset(float baseFrequencyHzIn) const noexcept
+    {
+        return baseFrequencyHzIn * std::pow(2.0f, mThumpSemitones / 12.0f);
+    }
+
+    void advanceThumpSemitoneDecay() noexcept
+    {
+        if (mThumpSemitones <= 0.0f)
+        {
+            return;
+        }
+
+        mThumpSemitones *= mThumpDecayMultiplierPerSample;
+        if (mThumpSemitones < thumpSemitoneFloor)
+        {
+            mThumpSemitones = 0.0f;
+        }
+    }
+
+    void updateThumpDecayCoefficient() noexcept
+    {
+        const double n = static_cast<double>(thumpDurationSeconds) * sampleRateHz;
+        mThumpDecayMultiplierPerSample = static_cast<float>(std::exp(std::log(static_cast<double>(thumpSemitoneFloor)) / n));
+    }
+
     void advanceSubDriftLfos() noexcept
     {
         const double twoPi = juce::MathConstants<double>::twoPi;
@@ -672,6 +758,8 @@ private:
     float mNoteGainEnvelope { 0.0f };
     float mReleaseMultiplierPerSample { 1.0f };
     float mRisePerSample { 1.0f };
+    float mThumpSemitones { 0.0f };
+    float mThumpDecayMultiplierPerSample { 1.0f };
     float mActiveMidiNote { 36.0f };
     bool mIsNoteSustaining { false };
 
@@ -689,12 +777,24 @@ private:
     juce::LinearSmoothedValue<float> mMidBRatioSmoothed;
     juce::LinearSmoothedValue<float> mShapeSmoothed;
     juce::LinearSmoothedValue<float> mGritSmoothed;
+    std::atomic<float>* mBrakeParameter { nullptr };
+    juce::LinearSmoothedValue<float> mBrakeSmoother;
     static constexpr double glideTimeSeconds = 0.025;
     static constexpr double macroSmoothingSeconds = 0.01;
+    static constexpr double brakeSmootherSeconds = 0.05;
+    static constexpr float brakeFrequencyIdleFloorHz = 20.0f;
+    static constexpr float stutterRateScale = 40.0f;
+    static constexpr float stutterRatePower = 3.0f;
+    static constexpr float stutterSquareDuty = 0.5f;
+    float mStallStutterPhase { 0.0f };
     static constexpr double phaseLockThreshold = 0.01;
     static constexpr float attackTimeSeconds = 0.005f;
     static constexpr float releaseTauBaseSeconds = 0.035f;
     static constexpr float noteEnvelopeSilenceThreshold = 1.0e-6f;
+    static constexpr float thumpDurationSeconds = 0.045f;
+    static constexpr float thumpSemitoneFresh = 36.0f;
+    static constexpr float thumpSemitoneLegato = 18.0f;
+    static constexpr float thumpSemitoneFloor = 1.0e-9f;
     static constexpr float crossoverFrequencyHz = 150.0f;
     static constexpr float upperMidBoundaryHz = 400.0f;
     static constexpr float subDriftMaxCents = 20.0f;
