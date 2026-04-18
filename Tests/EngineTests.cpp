@@ -68,18 +68,19 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     engine.prepare(releaseSampleRate);
     engine.noteOn(kMidiNote, 1.0f);
 
-    juce::AudioBuffer<float> preBuffer(2, 320);
+    juce::AudioBuffer<float> preBuffer(2, 4096);
     preBuffer.clear();
     engine.process(preBuffer);
 
     engine.noteOff();
 
-    juce::AudioBuffer<float> buffer(2, 320);
+    constexpr int postNoteSamples = 32768;
+    juce::AudioBuffer<float> buffer(2, postNoteSamples);
     buffer.clear();
     engine.process(buffer);
 
     float earlyPeak = 0.0f;
-    for (int i = 0; i < 40; ++i)
+    for (int i = 0; i < 400; ++i)
     {
         earlyPeak = juce::jmax(earlyPeak, std::abs(buffer.getSample(0, i)));
     }
@@ -106,8 +107,8 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
         }
     }
 
-    REQUIRE(silenceStartSample >= 210);
-    REQUIRE(silenceStartSample <= 230);
+    REQUIRE(silenceStartSample >= 12000);
+    REQUIRE(silenceStartSample <= 30000);
 }
 
 TEST_CASE("Harmony 0 maps to 1:2:4 frequency ratios", "[engine][harmony][ratios]")

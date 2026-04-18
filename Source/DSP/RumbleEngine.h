@@ -15,8 +15,8 @@ public:
     void prepare(double sampleRate)
     {
         sampleRateHz = juce::jmax(1.0, sampleRate);
-        mReleasePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
-        mRisePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
+        mRisePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * attackTimeSeconds));
+        updateReleaseEnvelopeCoefficient();
 
         subOsc.prepare(sampleRateHz);
         midOscA.prepare(sampleRateHz);
@@ -124,6 +124,7 @@ public:
 
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
+        mActiveMidiNote = static_cast<float>(midiNoteNumber);
         mVelocity = juce::jlimit(0.0f, 1.0f, velocity);
 
         if (voiceAlreadyActive)
@@ -146,6 +147,7 @@ public:
             mGateRetriggerDipSamplesRemaining = juce::jmax(1, juce::roundToInt(sampleRateHz * gateRetriggerDipSeconds));
         }
 
+        updateReleaseEnvelopeCoefficient();
         updateFrequencyRatios();
         applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
 
@@ -183,9 +185,10 @@ public:
             }
             else if (mNoteGainEnvelope > 0.0f)
             {
-                mNoteGainEnvelope = juce::jmax(0.0f, mNoteGainEnvelope - mReleasePerSample);
-                if (mNoteGainEnvelope <= 0.0f)
+                mNoteGainEnvelope *= mReleaseMultiplierPerSample;
+                if (mNoteGainEnvelope < noteEnvelopeSilenceThreshold)
                 {
+                    mNoteGainEnvelope = 0.0f;
                     mVelocity = 0.0f;
                     subOsc.setActive(false);
                     midOscA.setActive(false);
@@ -443,11 +446,10 @@ private:
 
     float applySafetyOutputStage(int channelIndex, float x) noexcept
     {
-        float y = dcBlockers[static_cast<size_t>(channelIndex)].processSample(x);
         float low = 0.0f;
         float high = 0.0f;
-        safetyOutputHp[static_cast<size_t>(channelIndex)].processSample(0, y, low, high);
-        return high;
+        safetyOutputHp[static_cast<size_t>(channelIndex)].processSample(0, x, low, high);
+        return dcBlockers[static_cast<size_t>(channelIndex)].processSample(high);
     }
 
     void resetSafetyOutputStage() noexcept
@@ -631,6 +633,14 @@ private:
         return std::pow(2.0f, cents / 1200.0f);
     }
 
+    void updateReleaseEnvelopeCoefficient() noexcept
+    {
+        const float noteClamped = juce::jlimit(12.0f, 127.0f, mActiveMidiNote);
+        const float stretch = juce::jmap(noteClamped, 16.0f, 96.0f, 1.55f, 0.88f);
+        const double tauSec = static_cast<double>(releaseTauBaseSeconds) * static_cast<double>(stretch);
+        mReleaseMultiplierPerSample = static_cast<float>(std::exp(-1.0 / (sampleRateHz * tauSec)));
+    }
+
     float decorrelationDelaySamples(float girthAmount) const noexcept
     {
         const float delayMs = juce::jmap(juce::jlimit(0.0f, 1.0f, girthAmount), 2.0f, 5.0f);
@@ -660,8 +670,9 @@ private:
     float mMidAFrequencyHz { 110.0f };
     float mMidBFrequencyHz { 220.0f };
     float mNoteGainEnvelope { 0.0f };
-    float mReleasePerSample { 1.0f };
+    float mReleaseMultiplierPerSample { 1.0f };
     float mRisePerSample { 1.0f };
+    float mActiveMidiNote { 36.0f };
     bool mIsNoteSustaining { false };
 
     double mCurrentBpm { 120.0 };
@@ -681,7 +692,9 @@ private:
     static constexpr double glideTimeSeconds = 0.025;
     static constexpr double macroSmoothingSeconds = 0.01;
     static constexpr double phaseLockThreshold = 0.01;
-    static constexpr float releaseTimeSeconds = 0.005f;
+    static constexpr float attackTimeSeconds = 0.005f;
+    static constexpr float releaseTauBaseSeconds = 0.035f;
+    static constexpr float noteEnvelopeSilenceThreshold = 1.0e-6f;
     static constexpr float crossoverFrequencyHz = 150.0f;
     static constexpr float upperMidBoundaryHz = 400.0f;
     static constexpr float subDriftMaxCents = 20.0f;
