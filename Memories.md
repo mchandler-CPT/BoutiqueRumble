@@ -34,6 +34,7 @@
 - **[2026-04-17] Pro-Click Hunt Hardening Pass**: Enforced lingering-signal legato behavior (no phase reset unless envelope is fully silent), added host-phase micro-jitter rejection around internal gate phase, and pinned GRIT quantization/tear to smoothed GRIT values to eliminate block-edge entropy clicks.
 - **[2026-04-18] Hardcoded 20% Random Step-Skipping for rhythmic syncopation**: On each gate-phase wrap, `RumbleEngine` rolls `entropyRandom` (~20% chance) to set `mCurrentStepIsSkipped`; while set, `getGateTarget()` returns silence for that rhythmic cycle so roughly one in five pulses drops out for syncopated rumble.
 - **[2026-04-18] Added dynamic SKIP slider (0-100%) for real-time rhythmic chaos control**: APVTS float `skip_prob` / UI label `SKIP` (default 0.2) drives `RumbleEngine::setSkipProbability`; at 0 the gate never skips, at 1 every wrapped step is skipped (`nextFloat() < 1`) for full rhythmic silence through the pulse.
+- **[2026-04-18] Implemented Isolated Sub-Drift (3:7:11) mapped to the GIRTH knob**: Three free-running sine LFOs at 0.31 / 0.73 / 1.13 Hz (prime-scaled “3:7:11” character) sum to a normalized depth; `GIRTH` scales fine detune of Mid A/B up to ±20 cents via `2^(cents/1200)`, while mid oscillators keep advancing phase when inactive so short gates sample evolving drift.
 
 ## The "Ant" Preferences
 - Focus on "Separation" and "Vibe" over clinical phase perfection.

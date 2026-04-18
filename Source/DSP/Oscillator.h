@@ -38,6 +38,7 @@ public:
     {
         if (! mIsActive)
         {
+            advancePhase();
             return 0.0f;
         }
 

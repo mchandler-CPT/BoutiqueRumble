@@ -46,6 +46,7 @@ public:
         gateSlew.prepare(sampleRateHz);
         prepareCrossover();
         mCurrentStepIsSkipped = false;
+        mSubDriftLfoTheta = {};
         noteOff();
     }
 
@@ -164,6 +165,8 @@ public:
 
         for (int sample = 0; sample < numSamples; ++sample)
         {
+            advanceSubDriftLfos();
+
             if (mIsNoteSustaining)
             {
                 mNoteGainEnvelope = juce::jmin(1.0f, mNoteGainEnvelope + mRisePerSample);
@@ -515,12 +518,36 @@ private:
     void applyCurrentBaseFrequency(float baseFrequency)
     {
         mSubFrequencyHz = baseFrequency;
-        mMidAFrequencyHz = baseFrequency * mCurrentMidARatio;
-        mMidBFrequencyHz = baseFrequency * mCurrentMidBRatio;
+        const float driftRatio = getSubDriftFrequencyRatio();
+        mMidAFrequencyHz = baseFrequency * mCurrentMidARatio * driftRatio;
+        mMidBFrequencyHz = baseFrequency * mCurrentMidBRatio * driftRatio;
 
         subOsc.setFrequency(mSubFrequencyHz);
         midOscA.setFrequency(mMidAFrequencyHz);
         midOscB.setFrequency(mMidBFrequencyHz);
+    }
+
+    void advanceSubDriftLfos() noexcept
+    {
+        const double twoPi = juce::MathConstants<double>::twoPi;
+        for (size_t i = 0; i < subDriftLfoHz.size(); ++i)
+        {
+            mSubDriftLfoTheta[i] += twoPi * static_cast<double>(subDriftLfoHz[i]) / sampleRateHz;
+            while (mSubDriftLfoTheta[i] >= twoPi)
+            {
+                mSubDriftLfoTheta[i] -= twoPi;
+            }
+        }
+    }
+
+    float getSubDriftFrequencyRatio() const noexcept
+    {
+        const float s0 = static_cast<float>(std::sin(mSubDriftLfoTheta[0]));
+        const float s1 = static_cast<float>(std::sin(mSubDriftLfoTheta[1]));
+        const float s2 = static_cast<float>(std::sin(mSubDriftLfoTheta[2]));
+        const float sumNorm = (s0 + s1 + s2) * (1.0f / 3.0f);
+        const float cents = mGirth * subDriftMaxCents * sumNorm;
+        return std::pow(2.0f, cents / 1200.0f);
     }
 
     float decorrelationDelaySamples(float girthAmount) const noexcept
@@ -576,6 +603,9 @@ private:
     static constexpr float releaseTimeSeconds = 0.005f;
     static constexpr float crossoverFrequencyHz = 150.0f;
     static constexpr float upperMidBoundaryHz = 400.0f;
+    static constexpr float subDriftMaxCents = 20.0f;
+    static constexpr std::array<float, 3> subDriftLfoHz { 0.31f, 0.73f, 1.13f };
+    std::array<double, 3> mSubDriftLfoTheta {};
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> upperSplitFilters;
