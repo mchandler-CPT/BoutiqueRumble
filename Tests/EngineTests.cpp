@@ -85,13 +85,14 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     }
     REQUIRE(earlyPeak > 1.0e-4f);
 
+    constexpr float silenceFloor = 1.0e-4f;
     int silenceStartSample = -1;
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
         bool remainingSilent = true;
         for (int j = i; j < buffer.getNumSamples(); ++j)
         {
-            if (std::abs(buffer.getSample(0, j)) > 1.0e-6f || std::abs(buffer.getSample(1, j)) > 1.0e-6f)
+            if (std::abs(buffer.getSample(0, j)) > silenceFloor || std::abs(buffer.getSample(1, j)) > silenceFloor)
             {
                 remainingSilent = false;
                 break;

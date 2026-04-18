@@ -45,8 +45,10 @@ public:
         setPulse(mPulse);
         gateSlew.prepare(sampleRateHz);
         prepareCrossover();
+        prepareSafetyOutputStage();
         mCurrentStepIsSkipped = false;
         mSubDriftLfoTheta = {};
+        mGateRetriggerDipSamplesRemaining = 0;
         noteOff();
     }
 
@@ -81,7 +83,8 @@ public:
         mGateDutyCycle = juce::jmap(mPulse, 0.0f, 1.0f, 0.15f, 0.95f);
 
         // Lower pulse values feel clickier; higher values soften gate transitions.
-        const float slewMs = juce::jmap(mPulse, 0.0f, 1.0f, 0.2f, 35.0f);
+        // Never go below ~1 ms edges: a true 0 ms slew clicks on square LFO flanks.
+        const float slewMs = juce::jmax(minGateSlewMs, juce::jmap(mPulse, 0.0f, 1.0f, 0.2f, 35.0f));
         gateSlew.setRiseAndFallTimesMs(slewMs, slewMs);
     }
 
@@ -116,12 +119,14 @@ public:
 
     void noteOn(int midiNoteNumber, float velocity)
     {
-        const bool hasLingeringSignal = mIsNoteSustaining || mNoteGainEnvelope > 0.0f;
+        const bool voiceAlreadyActive = mIsNoteSustaining || mNoteGainEnvelope > 0.0f;
+        const bool legatoRetrigger = mIsNoteSustaining;
+
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
         mVelocity = juce::jlimit(0.0f, 1.0f, velocity);
 
-        if (hasLingeringSignal)
+        if (voiceAlreadyActive)
         {
             mCurrentFrequency.setTargetValue(mBaseFrequencyHz);
         }
@@ -134,6 +139,11 @@ public:
                 midOscA.resetPhase();
                 midOscB.resetPhase();
             }
+        }
+
+        if (legatoRetrigger)
+        {
+            mGateRetriggerDipSamplesRemaining = juce::jmax(1, juce::roundToInt(sampleRateHz * gateRetriggerDipSeconds));
         }
 
         updateFrequencyRatios();
@@ -209,6 +219,21 @@ public:
             rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
             leftOut *= mNoteGainEnvelope;
             rightOut *= mNoteGainEnvelope;
+
+            if (mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
+            {
+                leftOut = 0.0f;
+                rightOut = 0.0f;
+                resetSafetyOutputStage();
+            }
+            else
+            {
+                leftOut = applySafetyOutputStage(0, leftOut);
+                if (numOutputChannels > 1)
+                {
+                    rightOut = applySafetyOutputStage(1, rightOut);
+                }
+            }
 
             buffer.setSample(0, sample, leftOut);
             if (numOutputChannels > 1)
@@ -389,6 +414,55 @@ private:
         rightDecorrelator.setDelay(decorrelationDelaySamples(mGirth));
     }
 
+    void prepareSafetyOutputStage()
+    {
+        juce::dsp::ProcessSpec spec {};
+        spec.sampleRate = sampleRateHz;
+        spec.maximumBlockSize = 2048;
+        spec.numChannels = 1;
+
+        const auto dcCoeffs = juce::dsp::IIR::Coefficients<float>::makeFirstOrderHighPass(
+            sampleRateHz,
+            static_cast<float>(dcBlockerHz));
+
+        for (size_t i = 0; i < dcBlockers.size(); ++i)
+        {
+            dcBlockers[i].reset();
+            dcBlockers[i].prepare(spec);
+            dcBlockers[i].coefficients = dcCoeffs;
+        }
+
+        for (size_t i = 0; i < safetyOutputHp.size(); ++i)
+        {
+            safetyOutputHp[i].reset();
+            safetyOutputHp[i].prepare(spec);
+            safetyOutputHp[i].setType(juce::dsp::LinkwitzRileyFilterType::highpass);
+            safetyOutputHp[i].setCutoffFrequency(safetyHighPassHz);
+        }
+    }
+
+    float applySafetyOutputStage(int channelIndex, float x) noexcept
+    {
+        float y = dcBlockers[static_cast<size_t>(channelIndex)].processSample(x);
+        float low = 0.0f;
+        float high = 0.0f;
+        safetyOutputHp[static_cast<size_t>(channelIndex)].processSample(0, y, low, high);
+        return high;
+    }
+
+    void resetSafetyOutputStage() noexcept
+    {
+        for (auto& dc : dcBlockers)
+        {
+            dc.reset();
+        }
+
+        for (auto& hp : safetyOutputHp)
+        {
+            hp.reset();
+        }
+    }
+
     void processSpatialFrame(float& inOutLeft, float& inOutRight)
     {
         const float dryLeft = inOutLeft;
@@ -475,7 +549,14 @@ private:
 
     float advanceGate(double gatePhase)
     {
-        return gateSlew.process(getGateTarget(gatePhase));
+        float target = getGateTarget(gatePhase);
+        if (mGateRetriggerDipSamplesRemaining > 0)
+        {
+            target = 0.0f;
+            --mGateRetriggerDipSamplesRemaining;
+        }
+
+        return gateSlew.process(target);
     }
 
     float applyGritManifold(float oscillatorSample)
@@ -606,6 +687,13 @@ private:
     static constexpr float subDriftMaxCents = 20.0f;
     static constexpr std::array<float, 3> subDriftLfoHz { 0.31f, 0.73f, 1.13f };
     std::array<double, 3> mSubDriftLfoTheta {};
+    static constexpr float minGateSlewMs = 1.0f;
+    static constexpr float gateRetriggerDipSeconds = 0.001f;
+    int mGateRetriggerDipSamplesRemaining { 0 };
+    static constexpr float dcBlockerHz = 5.0f;
+    static constexpr float safetyHighPassHz = 25.0f;
+    std::array<juce::dsp::IIR::Filter<float>, 2> dcBlockers;
+    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> safetyOutputHp;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> upperSplitFilters;
