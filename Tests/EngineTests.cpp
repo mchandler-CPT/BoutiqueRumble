@@ -68,7 +68,7 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     engine.prepare(releaseSampleRate);
     engine.noteOn(kMidiNote, 1.0f);
 
-    juce::AudioBuffer<float> preBuffer(2, 64);
+    juce::AudioBuffer<float> preBuffer(2, 320);
     preBuffer.clear();
     engine.process(preBuffer);
 
@@ -282,4 +282,58 @@ TEST_CASE("Monophonic note stack keeps newest note after older release", "[engin
     }
 
     REQUIRE(peak > 1.0e-4f);
+}
+
+TEST_CASE("Legato transition glides frequency over multiple samples", "[engine][midi][glide]")
+{
+    constexpr int noteA = 36;
+    constexpr int noteB = 48;
+    constexpr int traceSamples = 1600;
+    const float targetFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(noteB));
+
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.noteOn(noteA, 1.0f);
+    juce::ignoreUnused(engine.renderFrequencyTraceForTests(32)); // settle first note.
+
+    engine.noteOn(noteB, 1.0f); // legato: should glide, not snap.
+    const auto trace = engine.renderFrequencyTraceForTests(traceSamples);
+
+    REQUIRE(! trace.empty());
+    REQUIRE(std::abs(trace.front() - targetFrequency) > 0.5f);
+
+    int samplesToTarget = -1;
+    for (int i = 0; i < static_cast<int>(trace.size()); ++i)
+    {
+        if (std::abs(trace[static_cast<size_t>(i)] - targetFrequency) < 0.1f)
+        {
+            samplesToTarget = i;
+            break;
+        }
+    }
+
+    REQUIRE(samplesToTarget > 1);
+    REQUIRE(samplesToTarget < traceSamples);
+}
+
+TEST_CASE("Legato noteOn preserves oscillator phase continuity", "[engine][midi][phase]")
+{
+    constexpr int noteA = 40;
+    constexpr int noteB = 52;
+
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.noteOn(noteA, 1.0f);
+
+    juce::AudioBuffer<float> warmup(2, 128);
+    warmup.clear();
+    engine.process(warmup);
+
+    const auto phaseBefore = engine.getOscillatorPhasesForTests();
+    engine.noteOn(noteB, 1.0f); // legato transition
+    const auto phaseAfter = engine.getOscillatorPhasesForTests();
+
+    REQUIRE(phaseAfter[0] == Catch::Approx(phaseBefore[0]).margin(1.0e-9));
+    REQUIRE(phaseAfter[1] == Catch::Approx(phaseBefore[1]).margin(1.0e-9));
+    REQUIRE(phaseAfter[2] == Catch::Approx(phaseBefore[2]).margin(1.0e-9));
 }

@@ -53,6 +53,7 @@ private:
     std::atomic<float>* gritParam { nullptr };
     std::atomic<float>* girthParam { nullptr };
     std::atomic<float>* rateParam { nullptr };
+    std::atomic<float>* skipParam { nullptr };
     std::vector<int> mActiveNotes;
     double mInternalPpq { 0.0 };
     std::atomic<double> mDefaultBpm { 120.0 };

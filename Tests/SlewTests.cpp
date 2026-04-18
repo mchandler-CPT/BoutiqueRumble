@@ -108,3 +108,47 @@ TEST_CASE("Girth 0 and Pulse 0.1 produce a sharp percussive ping", "[slew][lfo][
     REQUIRE(earlyPeak > 0.7f);
     REQUIRE(envelope[midpoint] < 0.2f);
 }
+
+TEST_CASE("Legato second note does not reset oscillator phase", "[slew][legato][phase]")
+{
+    RumbleEngine engine;
+    engine.prepare(48000.0);
+    engine.noteOn(40, 1.0f);
+
+    juce::AudioBuffer<float> warmup(2, 128);
+    warmup.clear();
+    engine.process(warmup);
+
+    const auto phaseBefore = engine.getOscillatorPhasesForTests();
+    engine.noteOn(52, 1.0f); // legato transition
+    const auto phaseAfter = engine.getOscillatorPhasesForTests();
+
+    REQUIRE(phaseAfter[0] == Catch::Approx(phaseBefore[0]).margin(1.0e-9));
+    REQUIRE(phaseAfter[1] == Catch::Approx(phaseBefore[1]).margin(1.0e-9));
+    REQUIRE(phaseAfter[2] == Catch::Approx(phaseBefore[2]).margin(1.0e-9));
+}
+
+TEST_CASE("Legato transition avoids zero-value sample discontinuity", "[slew][legato][continuity]")
+{
+    RumbleEngine engine;
+    engine.prepare(48000.0);
+    engine.setShape(0.0f); // sine exposes reset-to-zero artifacts.
+    engine.setTransportInfo(120.0, 0.0, false, false); // keep gate open.
+    engine.noteOn(40, 1.0f);
+
+    juce::AudioBuffer<float> warmup(2, 256);
+    warmup.clear();
+    engine.process(warmup);
+
+    engine.noteOn(52, 1.0f); // legato transition
+
+    juce::AudioBuffer<float> transition(2, 24);
+    transition.clear();
+    engine.process(transition);
+
+    for (int i = 0; i < transition.getNumSamples(); ++i)
+    {
+        REQUIRE(std::abs(transition.getSample(0, i)) > 1.0e-8f);
+        REQUIRE(std::abs(transition.getSample(1, i)) > 1.0e-8f);
+    }
+}

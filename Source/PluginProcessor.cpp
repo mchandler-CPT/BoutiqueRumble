@@ -21,6 +21,7 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     gritParam = apvts.getRawParameterValue(IDs::grit);
     girthParam = apvts.getRawParameterValue(IDs::girth);
     rateParam = apvts.getRawParameterValue(IDs::rate);
+    skipParam = apvts.getRawParameterValue(IDs::skip_prob);
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -147,6 +148,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
         "Rate",
         juce::StringArray { "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64" },
         6));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::skip_prob, "SKIP", 0.0f, 1.0f, 0.2f));
 
     return { params.begin(), params.end() };
 }
@@ -167,6 +169,7 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float girth = (girthParam != nullptr) ? girthParam->load() : 0.0f;
     const float pulse = (pulseParam != nullptr) ? pulseParam->load() : 0.5f;
     const int rateIndex = (rateParam != nullptr) ? juce::roundToInt(rateParam->load()) : 6;
+    const float skipProbability = (skipParam != nullptr) ? skipParam->load() : 0.2f;
 
     double bpm = mDefaultBpm.load();
     double ppqPosition = mInternalPpq;
@@ -270,6 +273,7 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     rumbleEngine.setGirth(girth);
     rumbleEngine.setPulse(pulse);
     rumbleEngine.setRate(rateIndex);
+    rumbleEngine.setSkipProbability(skipProbability);
     rumbleEngine.setTransportInfo(bpm, ppqPosition, isPlaying, hasPpqPosition);
     rumbleEngine.process(buffer);
 }

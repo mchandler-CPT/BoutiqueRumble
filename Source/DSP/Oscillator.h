@@ -65,6 +65,11 @@ public:
         return sampleRateHz;
     }
 
+    double getPhaseForTests() const noexcept
+    {
+        return phase;
+    }
+
 private:
     static float polyBlep(float t, float dt)
     {

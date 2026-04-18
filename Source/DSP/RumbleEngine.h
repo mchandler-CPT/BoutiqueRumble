@@ -16,46 +16,62 @@ public:
     {
         sampleRateHz = juce::jmax(1.0, sampleRate);
         mReleasePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
+        mRisePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
 
         subOsc.prepare(sampleRateHz);
         midOscA.prepare(sampleRateHz);
         midOscB.prepare(sampleRateHz);
 
-        updateFrequencies();
-        setShape(shape);
+        updateFrequencyRatios();
+        mCurrentFrequency.reset(sampleRateHz, glideTimeSeconds);
+        mCurrentFrequency.setCurrentAndTargetValue(mBaseFrequencyHz);
+        mMidARatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
+        mMidBRatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
+        mMidARatioSmoothed.setCurrentAndTargetValue(mMidARatioTarget);
+        mMidBRatioSmoothed.setCurrentAndTargetValue(mMidBRatioTarget);
+        mCurrentMidARatio = mMidARatioSmoothed.getCurrentValue();
+        mCurrentMidBRatio = mMidBRatioSmoothed.getCurrentValue();
+        applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
+        mShapeSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
+        mShapeSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(shape));
+        mGritSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
+        mGritSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(mGrit));
+        mShapedShape = mShapeSmoothed.getCurrentValue();
+        mShapedGrit = mGritSmoothed.getCurrentValue();
+        mEntropy = mShapedGrit;
+        subOsc.setShape(mShapedShape);
+        midOscA.setShape(mShapedShape);
+        midOscB.setShape(mShapedShape);
         setPulse(mPulse);
         gateSlew.prepare(sampleRateHz);
-        gateSlew.reset(1.0f);
         prepareCrossover();
+        mCurrentStepIsSkipped = false;
         noteOff();
     }
 
     void setShape(float newShape)
     {
         shape = juce::jlimit(0.0f, 1.0f, newShape);
-        mShapedShape = applyKinkedMacroTaper(shape);
-
-        subOsc.setShape(mShapedShape);
-        midOscA.setShape(mShapedShape);
-        midOscB.setShape(mShapedShape);
+        mShapeSmoothed.setTargetValue(applyKinkedMacroTaper(shape));
     }
 
     void setHarmony(float newHarmony)
     {
         harmony = juce::jlimit(0.0f, 1.0f, newHarmony);
-        updateFrequencies();
+        updateFrequencyRatios();
+        applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
     }
 
     void setGrit(float newGrit)
     {
         mGrit = juce::jlimit(0.0f, 1.0f, newGrit);
-        mShapedGrit = applyKinkedMacroTaper(mGrit);
-        mEntropy = mShapedGrit;
+        mGritSmoothed.setTargetValue(applyKinkedMacroTaper(mGrit));
     }
 
     void setGirth(float newGirth)
     {
         mGirth = juce::jlimit(0.0f, 1.0f, newGirth);
+        rightDecorrelator.setDelay(decorrelationDelaySamples(mGirth));
     }
 
     void setPulse(float newPulse)
@@ -79,6 +95,11 @@ public:
         mSubdivisionMultiplier = rateIndexToMultiplier(mRateIndex);
     }
 
+    void setSkipProbability(float p) noexcept
+    {
+        mSkipProbability = juce::jlimit(0.0f, 1.0f, p);
+    }
+
     void setMasterGain(float newMasterGain)
     {
         mMasterGain = juce::jmax(0.0f, newMasterGain);
@@ -94,24 +115,34 @@ public:
 
     void noteOn(int midiNoteNumber, float velocity)
     {
+        const bool hasLingeringSignal = mIsNoteSustaining || mNoteGainEnvelope > 0.0f;
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
         mVelocity = juce::jlimit(0.0f, 1.0f, velocity);
 
-        updateFrequencies();
+        if (hasLingeringSignal)
+        {
+            mCurrentFrequency.setTargetValue(mBaseFrequencyHz);
+        }
+        else
+        {
+            mCurrentFrequency.setCurrentAndTargetValue(mBaseFrequencyHz);
+            if (mNoteGainEnvelope <= 0.0f)
+            {
+                subOsc.resetPhase();
+                midOscA.resetPhase();
+                midOscB.resetPhase();
+            }
+        }
 
-        subOsc.resetPhase();
-        midOscA.resetPhase();
-        midOscB.resetPhase();
+        updateFrequencyRatios();
+        applyCurrentBaseFrequency(mCurrentFrequency.getCurrentValue());
 
         subOsc.setActive(true);
         midOscA.setActive(true);
         midOscB.setActive(true);
 
         mIsNoteSustaining = true;
-        mNoteGainEnvelope = 1.0f;
-
-        gateSlew.reset(mIsTransportPlaying ? 0.0f : 1.0f);
     }
 
     void noteOff()
@@ -135,7 +166,7 @@ public:
         {
             if (mIsNoteSustaining)
             {
-                mNoteGainEnvelope = 1.0f;
+                mNoteGainEnvelope = juce::jmin(1.0f, mNoteGainEnvelope + mRisePerSample);
             }
             else if (mNoteGainEnvelope > 0.0f)
             {
@@ -149,19 +180,30 @@ public:
                 }
             }
 
+            const float currentBaseFrequency = mCurrentFrequency.getNextValue();
+            mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
+            mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
+            applyCurrentBaseFrequency(currentBaseFrequency);
+            mShapedShape = mShapeSmoothed.getNextValue();
+            mShapedGrit = mGritSmoothed.getNextValue();
+            mEntropy = mShapedGrit;
+            subOsc.setShape(mShapedShape);
+            midOscA.setShape(mShapedShape);
+            midOscB.setShape(mShapedShape);
+
             const float sub = subOsc.getNextSample() * 0.6f;
             const float midA = midOscA.getNextSample() * 0.2f;
             const float midB = midOscB.getNextSample() * 0.2f;
             const float gate = advanceGate(gatePhase);
 
-            const float oscillatorSample = (sub + midA + midB) * mMasterGain * mVelocity * gate;
-            float mixed = applyGritManifold(oscillatorSample);
+            const float subMono = sub * mMasterGain * mVelocity * gate;
+            const float midMono = (midA + midB) * mMasterGain * mVelocity * gate;
 
-            mixed = juce::jlimit(-1.0f, 1.0f, mixed);
-
-            float leftOut = mixed;
-            float rightOut = mixed;
+            float leftOut = applyGritManifold(midMono);
+            float rightOut = leftOut;
             processSpatialFrame(leftOut, rightOut);
+            leftOut = juce::jlimit(-1.0f, 1.0f, leftOut + subMono);
+            rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
             leftOut *= mNoteGainEnvelope;
             rightOut *= mNoteGainEnvelope;
 
@@ -179,6 +221,7 @@ public:
             if (gatePhase >= 1.0)
             {
                 gatePhase -= std::floor(gatePhase);
+                mCurrentStepIsSkipped = (entropyRandom.nextFloat() < mSkipProbability);
             }
         }
 
@@ -203,6 +246,11 @@ public:
     std::array<float, 3> getCurrentFrequenciesForTests() const noexcept
     {
         return { mSubFrequencyHz, mMidAFrequencyHz, mMidBFrequencyHz };
+    }
+
+    std::array<double, 3> getOscillatorPhasesForTests() const noexcept
+    {
+        return { subOsc.getPhaseForTests(), midOscA.getPhaseForTests(), midOscB.getPhaseForTests() };
     }
 
     float getRateMultiplierForTests() const noexcept
@@ -234,6 +282,7 @@ public:
             if (gatePhase >= 1.0)
             {
                 gatePhase -= std::floor(gatePhase);
+                mCurrentStepIsSkipped = (entropyRandom.nextFloat() < mSkipProbability);
             }
         }
 
@@ -252,12 +301,35 @@ public:
         output.reserve(static_cast<size_t>(numSamples));
         for (int i = 0; i < numSamples; ++i)
         {
+            mShapedGrit = mGritSmoothed.getNextValue();
+            mEntropy = mShapedGrit;
             const float phase = static_cast<float>(i) * frequencyHz / static_cast<float>(sampleRateHz);
             const float oscillatorSample = std::sin(juce::MathConstants<float>::twoPi * std::fmod(phase, 1.0f));
             output.push_back(applyGritManifold(oscillatorSample));
         }
 
         return output;
+    }
+
+    std::vector<float> renderFrequencyTraceForTests(int numSamples)
+    {
+        std::vector<float> trace;
+        if (numSamples <= 0)
+        {
+            return trace;
+        }
+
+        trace.reserve(static_cast<size_t>(numSamples));
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float currentBase = mCurrentFrequency.getNextValue();
+            mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
+            mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
+            applyCurrentBaseFrequency(currentBase);
+            trace.push_back(mSubFrequencyHz);
+        }
+
+        return trace;
     }
 
 private:
@@ -301,9 +373,17 @@ private:
             highPassFilter.setCutoffFrequency(crossoverFrequencyHz);
         }
 
+        for (auto& upperSplitFilter : upperSplitFilters)
+        {
+            upperSplitFilter.reset();
+            upperSplitFilter.prepare(spec);
+            upperSplitFilter.setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
+            upperSplitFilter.setCutoffFrequency(upperMidBoundaryHz);
+        }
+
         rightDecorrelator.reset();
         rightDecorrelator.prepare(spec);
-        rightDecorrelator.setDelay(decorrelationDelaySamples());
+        rightDecorrelator.setDelay(decorrelationDelaySamples(mGirth));
     }
 
     void processSpatialFrame(float& inOutLeft, float& inOutRight)
@@ -324,15 +404,25 @@ private:
 
         const float lowMono = 0.5f * (lowLeft + lowRight);
 
-        rightDecorrelator.pushSample(0, highRight);
-        highRight = rightDecorrelator.popSample(0);
+        float upperMidLeft = 0.0f;
+        float upperMidRight = 0.0f;
+        float airLeft = 0.0f;
+        float airRight = 0.0f;
+        upperSplitFilters[0].processSample(0, highLeft, upperMidLeft, airLeft);
+        upperSplitFilters[1].processSample(0, highRight, upperMidRight, airRight);
 
-        const float mid = 0.5f * (highLeft + highRight);
-        const float sideEnergy = std::abs(highLeft) + std::abs(highRight);
+        const float upperMidMono = 0.5f * (upperMidLeft + upperMidRight);
+
+        rightDecorrelator.pushSample(0, airRight);
+        const float delayedAirRight = rightDecorrelator.popSample(0);
+        const float decorrelatedAirRight = juce::jmap(mGirth, airRight, delayedAirRight);
+
+        const float mid = 0.5f * (airLeft + decorrelatedAirRight);
+        const float sideEnergy = std::abs(airLeft) + std::abs(decorrelatedAirRight);
         const float sideWeight = juce::jlimit(0.0f, 1.0f, sideEnergy * 2.0f);
-        const float side = 0.5f * (highLeft - highRight) * (1.0f + mGirth) * sideWeight;
-        const float widenedLeft = mid + side;
-        const float widenedRight = mid - side;
+        const float side = 0.5f * (airLeft - decorrelatedAirRight) * (1.0f + mGirth) * sideWeight;
+        const float widenedLeft = upperMidMono + mid + side;
+        const float widenedRight = upperMidMono + mid - side;
 
         inOutLeft = juce::jlimit(-1.0f, 1.0f, lowMono + widenedLeft);
         inOutRight = juce::jlimit(-1.0f, 1.0f, lowMono + widenedRight);
@@ -347,7 +437,15 @@ private:
     {
         if (mHasHostPpq)
         {
-            return std::fmod(mCurrentPpqPosition * static_cast<double>(mSubdivisionMultiplier), 1.0);
+            const double hostPhase = std::fmod(mCurrentPpqPosition * static_cast<double>(mSubdivisionMultiplier), 1.0);
+            const double diff = std::abs(hostPhase - mInternalGatePhase);
+            const double wrappedDiff = juce::jmin(diff, 1.0 - diff);
+            if (wrappedDiff < phaseLockThreshold)
+            {
+                return mInternalGatePhase;
+            }
+
+            return hostPhase;
         }
 
         return mInternalGatePhase;
@@ -358,6 +456,11 @@ private:
         if (! mIsTransportPlaying)
         {
             return 1.0f;
+        }
+
+        if (mCurrentStepIsSkipped)
+        {
+            return 0.0f;
         }
 
         const float squareGate = gatePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
@@ -376,12 +479,12 @@ private:
     {
         float processed = oscillatorSample;
 
-        const float tear = (entropyRandom.nextFloat() * 2.0f - 1.0f) * std::abs(oscillatorSample) * mEntropy * 0.1f;
+        const float tear = (entropyRandom.nextFloat() * 2.0f - 1.0f) * std::abs(oscillatorSample) * mShapedGrit * 0.1f;
         processed += tear;
 
-        if (mEntropy > 0.5f)
+        if (mShapedGrit > 0.5f)
         {
-            const float bits = juce::jmap(mEntropy, 0.5f, 1.0f, 12.0f, 3.0f);
+            const float bits = juce::jmap(mShapedGrit, 0.5f, 1.0f, 12.0f, 3.0f);
             const float quantizationLevels = std::pow(2.0f, bits);
             processed = std::round(processed * quantizationLevels) / quantizationLevels;
         }
@@ -397,27 +500,33 @@ private:
         return processed;
     }
 
-    void updateFrequencies()
+    void updateFrequencyRatios()
     {
-        const float midARatio = (harmony <= 0.5f)
+        mMidARatioTarget = (harmony <= 0.5f)
             ? juce::jmap(harmony, 0.0f, 0.5f, 2.0f, 3.0f)
             : juce::jmap(harmony, 0.5f, 1.0f, 3.0f, 2.137f);
-        const float midBRatio = (harmony <= 0.5f)
+        mMidBRatioTarget = (harmony <= 0.5f)
             ? 4.0f
             : juce::jmap(harmony, 0.5f, 1.0f, 4.0f, 3.1415f);
+        mMidARatioSmoothed.setTargetValue(mMidARatioTarget);
+        mMidBRatioSmoothed.setTargetValue(mMidBRatioTarget);
+    }
 
-        mSubFrequencyHz = mBaseFrequencyHz;
-        mMidAFrequencyHz = mBaseFrequencyHz * midARatio;
-        mMidBFrequencyHz = mBaseFrequencyHz * midBRatio;
+    void applyCurrentBaseFrequency(float baseFrequency)
+    {
+        mSubFrequencyHz = baseFrequency;
+        mMidAFrequencyHz = baseFrequency * mCurrentMidARatio;
+        mMidBFrequencyHz = baseFrequency * mCurrentMidBRatio;
 
         subOsc.setFrequency(mSubFrequencyHz);
         midOscA.setFrequency(mMidAFrequencyHz);
         midOscB.setFrequency(mMidBFrequencyHz);
     }
 
-    float decorrelationDelaySamples() const noexcept
+    float decorrelationDelaySamples(float girthAmount) const noexcept
     {
-        return static_cast<float>(sampleRateHz * (decorrelationDelayMs * 0.001));
+        const float delayMs = juce::jmap(juce::jlimit(0.0f, 1.0f, girthAmount), 2.0f, 5.0f);
+        return static_cast<float>(sampleRateHz * (delayMs * 0.001f));
     }
 
     double sampleRateHz { 44100.0 };
@@ -433,6 +542,10 @@ private:
     float mGirth { 0.0f };
     float mPulse { 0.5f };
     float mGateDutyCycle { 0.55f };
+    float mMidARatioTarget { 2.0f };
+    float mMidBRatioTarget { 4.0f };
+    float mCurrentMidARatio { 2.0f };
+    float mCurrentMidBRatio { 4.0f };
     float mSubdivisionMultiplier { 4.0f };
     int mRateIndex { 6 };
     float mSubFrequencyHz { 55.0f };
@@ -440,6 +553,7 @@ private:
     float mMidBFrequencyHz { 220.0f };
     float mNoteGainEnvelope { 0.0f };
     float mReleasePerSample { 1.0f };
+    float mRisePerSample { 1.0f };
     bool mIsNoteSustaining { false };
 
     double mCurrentBpm { 120.0 };
@@ -447,13 +561,24 @@ private:
     double mInternalGatePhase { 0.0 };
     bool mIsTransportPlaying { false };
     bool mHasHostPpq { false };
+    bool mCurrentStepIsSkipped { false };
+    float mSkipProbability { 0.2f };
 
     SlewLimiter gateSlew;
+    juce::LinearSmoothedValue<float> mCurrentFrequency;
+    juce::LinearSmoothedValue<float> mMidARatioSmoothed;
+    juce::LinearSmoothedValue<float> mMidBRatioSmoothed;
+    juce::LinearSmoothedValue<float> mShapeSmoothed;
+    juce::LinearSmoothedValue<float> mGritSmoothed;
+    static constexpr double glideTimeSeconds = 0.025;
+    static constexpr double macroSmoothingSeconds = 0.01;
+    static constexpr double phaseLockThreshold = 0.01;
     static constexpr float releaseTimeSeconds = 0.005f;
     static constexpr float crossoverFrequencyHz = 150.0f;
-    static constexpr float decorrelationDelayMs = 3.5f;
+    static constexpr float upperMidBoundaryHz = 400.0f;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
     std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
+    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> upperSplitFilters;
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> rightDecorrelator { 512 };
     juce::Random entropyRandom;
 

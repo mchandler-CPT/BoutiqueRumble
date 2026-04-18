@@ -24,6 +24,7 @@ private:
     juce::Slider girthSlider;
     juce::Slider harmonySlider;
     juce::Slider rateSlider;
+    juce::Slider skipSlider;
 
     juce::Label pulseLabel;
     juce::Label shapeLabel;
@@ -31,6 +32,7 @@ private:
     juce::Label girthLabel;
     juce::Label harmonyLabel;
     juce::Label rateLabel;
+    juce::Label skipLabel;
     juce::Label bpmLabel;
 
     juce::Slider bpmBox;
@@ -41,6 +43,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> girthAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> harmonyAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rateAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> skipAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BoutiqueRumbleAudioProcessorEditor)
 };
