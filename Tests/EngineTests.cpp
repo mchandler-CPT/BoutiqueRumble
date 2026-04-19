@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <unordered_set>
+#include <utility>
 #include "DSP/RumbleEngine.h"
 
 namespace
@@ -63,6 +64,89 @@ TEST_CASE("SKIP motif is seeded by MIDI note and SKIP value", "[engine][motif][s
     restored.setSkipProbability(skip);
     restored.noteOn(55, 1.0f);
     REQUIRE(restored.getMotifPatternForTests() == motif55);
+}
+
+TEST_CASE("SKIP motif pattern is deterministic for multiple note and skip pairs", "[engine][motif][determinism][persistence]")
+{
+    constexpr std::array<std::pair<int, float>, 8> noteSkipPairs { {
+        { 36, 0.11f },
+        { 41, 0.99f },
+        { 48, 0.05f },
+        { 55, 0.33f },
+        { 60, 0.73f },
+        { 72, 0.5f },
+        { 84, 0.125f },
+        { 96, 0.875f },
+    } };
+
+    for (const auto& pair : noteSkipPairs)
+    {
+        RumbleEngine firstInstance;
+        firstInstance.prepare(kSampleRate);
+        firstInstance.setSkipProbability(pair.second);
+        firstInstance.noteOn(pair.first, 1.0f);
+        const auto expectedPattern = firstInstance.getMotifPatternForTests();
+
+        RumbleEngine secondInstance;
+        secondInstance.prepare(kSampleRate);
+        secondInstance.setSkipProbability(pair.second);
+        secondInstance.noteOn(pair.first, 1.0f);
+
+        REQUIRE(secondInstance.getMotifPatternForTests() == expectedPattern);
+    }
+}
+
+TEST_CASE("Motif step index wraps every 16 pulse wraps and pulse phase stays bounded", "[engine][motif][transport][lfo]")
+{
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.setTransportInfo(120.0, 0.0, true, false);
+    engine.setRate(6);
+    engine.setSkipProbability(0.5f);
+    engine.noteOn(60, 1.0f);
+
+    REQUIRE(engine.getMotifStepIndexForTests() == 0);
+
+    for (int pulse = 1; pulse <= 16; ++pulse)
+    {
+        engine.advancePulseWrappedRhythmForTests(1);
+        const auto expectedIndex = static_cast<uint8_t>(pulse % 16);
+        REQUIRE(engine.getMotifStepIndexForTests() == expectedIndex);
+
+        const double phase = engine.getPulsePhaseForTests();
+        REQUIRE(phase >= 0.0);
+        REQUIRE(phase < 1.0);
+    }
+
+    RumbleEngine twin;
+    twin.prepare(kSampleRate);
+    twin.setTransportInfo(120.0, 0.0, true, false);
+    twin.setRate(6);
+    twin.setSkipProbability(0.5f);
+    twin.noteOn(60, 1.0f);
+
+    engine.advancePulseWrappedRhythmForTests(23);
+    twin.advancePulseWrappedRhythmForTests(23);
+
+    REQUIRE(twin.getMotifStepIndexForTests() == engine.getMotifStepIndexForTests());
+    REQUIRE(twin.getPulsePhaseForTests() == Catch::Approx(engine.getPulsePhaseForTests()).margin(1.0e-9));
+}
+
+TEST_CASE("Motif step resets on host bar boundary while PPQ advances", "[engine][motif][transport][host]")
+{
+    RumbleEngine engine;
+    engine.prepare(kSampleRate);
+    engine.setTransportInfo(120.0, 0.0, true, true);
+    engine.setSkipProbability(0.5f);
+    engine.noteOn(48, 1.0f);
+
+    REQUIRE(engine.getMotifStepIndexForTests() == 0);
+    engine.advancePulseWrappedRhythmForTests(5);
+    REQUIRE(engine.getMotifStepIndexForTests() == 5);
+
+    engine.setTransportInfo(120.0, 4.0, true, true);
+    engine.advancePulseWrappedRhythmForTests(1);
+    REQUIRE(engine.getMotifStepIndexForTests() == 0);
 }
 
 TEST_CASE("RumbleEngine sums sub and mids deterministically", "[engine][sum][determinism]")

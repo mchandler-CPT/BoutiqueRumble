@@ -1,15 +1,19 @@
 #pragma once
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <random>
 #include <vector>
+
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
-#include <juce_dsp/juce_dsp.h>
-#include "Oscillator.h"
+
+#include "MotifEngine.h"
+#include "VoiceBank.h"
+#include "BrakePhysics.h"
+#include "SignalProcessor.h"
 #include "Utils/SlewLimiter.h"
 
 class RumbleEngine {
@@ -19,52 +23,18 @@ public:
     void prepare(double sampleRate)
     {
         sampleRateHz = juce::jmax(1.0, sampleRate);
-        mRisePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * attackTimeSeconds));
-        updateReleaseEnvelopeCoefficient();
-        updateThumpDecayCoefficient();
 
-        subOsc.prepare(sampleRateHz);
-        midOscA.prepare(sampleRateHz);
-        midOscB.prepare(sampleRateHz);
+        mVoice.prepare(sampleRateHz, mVoice.shape, mVoice.harmony, mGirth);
+        mSignal.prepareGritSmoother(sampleRateHz, macroSmoothingSeconds, SignalProcessor::applyKinkedMacroTaper(mSignal.mGrit));
+        mVoice.updateReleaseEnvelopeCoefficient(sampleRateHz, mCurrentBpm, mSubdivisionMultiplier);
 
-        updateFrequencyRatios();
-        mCurrentFrequency.reset(sampleRateHz, glideTimeSeconds);
-        mCurrentFrequency.setCurrentAndTargetValue(mBaseFrequencyHz);
-        mMidARatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
-        mMidBRatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
-        mMidARatioSmoothed.setCurrentAndTargetValue(mMidARatioTarget);
-        mMidBRatioSmoothed.setCurrentAndTargetValue(mMidBRatioTarget);
-        mCurrentMidARatio = mMidARatioSmoothed.getCurrentValue();
-        mCurrentMidBRatio = mMidBRatioSmoothed.getCurrentValue();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
-        mShapeSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
-        mShapeSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(shape));
-        mGritSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
-        mGritSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(mGrit));
-        mShapedShape = mShapeSmoothed.getCurrentValue();
-        mShapedGrit = mGritSmoothed.getCurrentValue();
-        mEntropy = mShapedGrit;
-        subOsc.setShape(mShapedShape);
-        midOscA.setShape(mShapedShape);
-        midOscB.setShape(mShapedShape);
         setPulse(mPulse);
         gateSlew.prepare(sampleRateHz);
-        prepareCrossover();
-        prepareSafetyOutputStage();
-        mCurrentStepIsSkipped = false;
-        mMotifPattern.fill(true);
-        mMotifBypass = true;
-        mMotifStepIndex = 0;
-        mMotifLastBarIndex = 0;
-        mMotifHaveBarAnchor = false;
-        mMotifLockedMidiNote = -1;
-        mMotifLockedSkipValue = -1.0f;
-        mSubDriftLfoTheta = {};
+        mSignal.prepareCrossover(sampleRateHz, mGirth);
+        mSignal.prepareSafety(sampleRateHz);
+        mMotif.prepareState();
         mGateRetriggerDipSamplesRemaining = 0;
-        mThumpSemitones = 0.0f;
-        mBrakeSmoother.reset(sampleRateHz, brakeSmootherSeconds);
-        mBrakeSmoother.setCurrentAndTargetValue(1.0f);
-        mStallStutterPhase = 0.0f;
+        mBrake.prepare(sampleRateHz, brakeSmootherSeconds);
         noteOff();
 #if JUCE_DEBUG
         mDbgHadPreviousOnset = false;
@@ -75,32 +45,29 @@ public:
 
     void setBrakeParameter(std::atomic<float>* param) noexcept
     {
-        mBrakeParameter = param;
+        mBrake.setParameter(param);
     }
 
     void setShape(float newShape)
     {
-        shape = juce::jlimit(0.0f, 1.0f, newShape);
-        mShapeSmoothed.setTargetValue(applyKinkedMacroTaper(shape));
+        mVoice.setShape(newShape);
     }
 
     void setHarmony(float newHarmony)
     {
-        harmony = juce::jlimit(0.0f, 1.0f, newHarmony);
-        updateFrequencyRatios();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
+        mVoice.setHarmony(newHarmony);
     }
 
     void setGrit(float newGrit)
     {
-        mGrit = juce::jlimit(0.0f, 1.0f, newGrit);
-        mGritSmoothed.setTargetValue(applyKinkedMacroTaper(mGrit));
+        mSignal.setGrit(newGrit);
     }
 
     void setGirth(float newGirth)
     {
         mGirth = juce::jlimit(0.0f, 1.0f, newGirth);
-        rightDecorrelator.setDelay(decorrelationDelaySamples(mGirth));
+        mSignal.setGirth(mGirth, sampleRateHz);
+        mVoice.setGirthForDrift(mGirth);
     }
 
     void setPulse(float newPulse)
@@ -108,8 +75,6 @@ public:
         mPulse = juce::jlimit(0.0f, 1.0f, newPulse);
         mGateDutyCycle = juce::jmap(mPulse, 0.0f, 1.0f, 0.15f, 0.95f);
 
-        // Lower pulse values feel clickier; higher values soften gate transitions.
-        // Never go below ~1 ms edges: a true 0 ms slew clicks on square LFO flanks.
         const float slewMs = juce::jmax(minGateSlewMs, juce::jmap(mPulse, 0.0f, 1.0f, 0.2f, 35.0f));
         gateSlew.setRiseAndFallTimesMs(slewMs, slewMs);
     }
@@ -117,14 +82,14 @@ public:
     void setSubdivision(float multiplier)
     {
         mSubdivisionMultiplier = juce::jlimit(0.25f, 16.0f, multiplier);
-        updateReleaseEnvelopeCoefficient();
+        mVoice.updateReleaseEnvelopeCoefficient(sampleRateHz, mCurrentBpm, mSubdivisionMultiplier);
     }
 
     void setRate(int index)
     {
         mRateIndex = juce::jlimit(0, 9, index);
         mSubdivisionMultiplier = rateIndexToMultiplier(mRateIndex);
-        updateReleaseEnvelopeCoefficient();
+        mVoice.updateReleaseEnvelopeCoefficient(sampleRateHz, mCurrentBpm, mSubdivisionMultiplier);
     }
 
     void setSkipProbability(float p) noexcept
@@ -135,7 +100,7 @@ public:
 
         if (mIsNoteSustaining && changed)
         {
-            rebuildMotifPattern(juce::jlimit(0, 127, juce::roundToInt(mActiveMidiNote)), clamped);
+            mMotif.rebuild(juce::jlimit(0, 127, juce::roundToInt(mVoice.mActiveMidiNote)), clamped, mCurrentPpqPosition, mHasHostPpq);
         }
     }
 
@@ -150,62 +115,26 @@ public:
         mCurrentPpqPosition = ppqPosition;
         mIsTransportPlaying = isPlaying;
         mHasHostPpq = hasPpqPosition;
-        updateReleaseEnvelopeCoefficient();
+        mVoice.updateReleaseEnvelopeCoefficient(sampleRateHz, mCurrentBpm, mSubdivisionMultiplier);
     }
 
     void noteOn(int midiNoteNumber, float velocity)
     {
-        const bool voiceAlreadyActive = mIsNoteSustaining || mNoteGainEnvelope > 0.0f;
+        const bool voiceAlreadyActive = mIsNoteSustaining || mVoice.mNoteGainEnvelope > 0.0f;
         const bool legatoRetrigger = mIsNoteSustaining;
-
-        if (! legatoRetrigger)
-        {
-            mNoteGainEnvelope = 0.0f;
-        }
-
-        const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
-        mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
-        mActiveMidiNote = static_cast<float>(midiNoteNumber);
-        mVelocity = juce::jlimit(0.0f, 1.0f, velocity);
-
-        if (voiceAlreadyActive)
-        {
-            mCurrentFrequency.setTargetValue(mBaseFrequencyHz);
-        }
-        else
-        {
-            mCurrentFrequency.setCurrentAndTargetValue(mBaseFrequencyHz);
-            if (mNoteGainEnvelope <= 0.0f)
-            {
-                subOsc.resetPhase();
-                midOscA.resetPhase();
-                midOscB.resetPhase();
-            }
-        }
 
         if (legatoRetrigger)
         {
             mGateRetriggerDipSamplesRemaining = juce::jmax(1, juce::roundToInt(sampleRateHz * gateRetriggerDipSeconds));
-            mThumpSemitones = juce::jmax(mThumpSemitones, thumpSemitoneLegato);
-        }
-        else
-        {
-            mThumpSemitones = thumpSemitoneFresh;
         }
 
-        updateReleaseEnvelopeCoefficient();
-        updateFrequencyRatios();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
-
-        subOsc.setActive(true);
-        midOscA.setActive(true);
-        midOscB.setActive(true);
+        mVoice.noteOn(midiNoteNumber, velocity, legatoRetrigger, voiceAlreadyActive, sampleRateHz, mCurrentBpm, mSubdivisionMultiplier);
 
         const int activeNote = juce::jlimit(0, 127, midiNoteNumber);
-        const bool shouldRebuildMotif = (! legatoRetrigger) || (activeNote != mMotifLockedMidiNote);
+        const bool shouldRebuildMotif = (! legatoRetrigger) || (activeNote != mMotif.lockedMidiNote);
         if (shouldRebuildMotif)
         {
-            rebuildMotifPattern(activeNote, mSkipProbability);
+            mMotif.rebuild(activeNote, mSkipProbability, mCurrentPpqPosition, mHasHostPpq);
         }
 
         mIsNoteSustaining = true;
@@ -225,7 +154,7 @@ public:
             return;
         }
 
-        updateReleaseEnvelopeCoefficient();
+        mVoice.updateReleaseEnvelopeCoefficient(sampleRateHz, mCurrentBpm, mSubdivisionMultiplier);
 
         double pulsePhase = getBlockStartPulsePhase();
         const double gatePhaseIncrement = getGatePhaseIncrement();
@@ -235,107 +164,50 @@ public:
 #if JUCE_DEBUG
             ++mGlobalAudioSampleCounterForDbg;
 #endif
-            advanceSubDriftLfos();
+            mVoice.advanceSubDriftLfos(sampleRateHz);
 
-            const float brakeTarget = (mBrakeParameter != nullptr) ? mBrakeParameter->load() : 1.0f;
-            mBrakeSmoother.setTargetValue(juce::jlimit(0.0f, 1.0f, brakeTarget));
-            const float brakeIn = mBrakeSmoother.getNextValue();
-            const float brakeWarpX = (brakeIn - 0.5f) * 10.0f;
-            const float warpedBrake = 1.0f / (1.0f + std::exp(-brakeWarpX));
+            const BrakePhysics::Frame brake = mBrake.next(sampleRateHz, mVoice.getSubFrequencyHz());
 
-            const float pitchMult = warpedBrake * warpedBrake * warpedBrake;
-            const float gainMult = brakeIn;
+            mVoice.tickAmplitudeEnvelope(mIsNoteSustaining);
 
-            const float stutterIntensity = 1.0f - brakeIn;
-            const float oneMinusBrake = 1.0f - brakeIn;
-            const float stutterRateHz = stutterRateScale * std::pow(oneMinusBrake, stutterRatePower);
+            mVoice.tickPitchGlideAndOrganicFrequencies();
+            mVoice.applyBrakeToOscFrequencies(brake);
+            mVoice.advanceShapeSmoothedAndApplyToOscillators();
+            mSignal.advanceGritSmoothed();
 
-            float rawStutterSquareWave = 1.0f;
-            if (stutterRateHz > 1.0e-9f)
-            {
-                mStallStutterPhase += stutterRateHz / static_cast<float>(sampleRateHz);
-                if (mStallStutterPhase >= 1.0f)
-                {
-                    mStallStutterPhase -= std::floor(mStallStutterPhase);
-                }
+            float sub = 0.0f;
+            float midA = 0.0f;
+            float midB = 0.0f;
+            mVoice.sampleOscillators(sub, midA, midB);
 
-                rawStutterSquareWave = (mStallStutterPhase < stutterSquareDuty) ? 1.0f : 0.0f;
-            }
-
-            const float brakeStutterGate = 1.0f - (stutterIntensity * (1.0f - rawStutterSquareWave));
-
-            if (mIsNoteSustaining)
-            {
-                mNoteGainEnvelope = juce::jmin(1.0f, mNoteGainEnvelope + mRisePerSample);
-            }
-            else if (mNoteGainEnvelope > 0.0f)
-            {
-                mNoteGainEnvelope *= mReleaseMultiplierPerSample;
-                if (mNoteGainEnvelope < noteEnvelopeSilenceThreshold)
-                {
-                    mNoteGainEnvelope = 0.0f;
-                    mVelocity = 0.0f;
-                    subOsc.setActive(false);
-                    midOscA.setActive(false);
-                    midOscB.setActive(false);
-                }
-            }
-
-            const float currentBaseFrequency = mCurrentFrequency.getNextValue();
-            mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
-            mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
-            applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(currentBaseFrequency));
-            advanceThumpSemitoneDecay();
-
-            const float rawSubHz = mSubFrequencyHz * pitchMult;
-            float subHz = rawSubHz;
-            if (brakeIn > 0.0f)
-            {
-                subHz = juce::jmax(brakeFrequencyIdleFloorHz, rawSubHz);
-            }
-
-            const float brakeFreqScale = (rawSubHz > 1.0e-6f) ? (subHz / rawSubHz) : 0.0f;
-            subOsc.setFrequency(subHz);
-            midOscA.setFrequency(mMidAFrequencyHz * pitchMult * brakeFreqScale);
-            midOscB.setFrequency(mMidBFrequencyHz * pitchMult * brakeFreqScale);
-            mShapedShape = mShapeSmoothed.getNextValue();
-            mShapedGrit = mGritSmoothed.getNextValue();
-            mEntropy = mShapedGrit;
-            subOsc.setShape(mShapedShape);
-            midOscA.setShape(mShapedShape);
-            midOscB.setShape(mShapedShape);
-
-            const float sub = subOsc.getNextSample() * 0.6f;
-            const float midA = midOscA.getNextSample() * 0.2f;
-            const float midB = midOscB.getNextSample() * 0.2f;
             const float pulseGateLfo = advanceGate(pulsePhase);
-            const float pulseGate = pulseGateLfo * brakeStutterGate;
+            const float pulseGate = pulseGateLfo * brake.stutterGate;
 
-            const float subMono = sub * mMasterGain * mVelocity * pulseGate;
-            const float midMono = (midA + midB) * mMasterGain * mVelocity * pulseGate;
+            const float subMono = sub * mMasterGain * mVoice.mVelocity * pulseGate;
+            const float midMono = (midA + midB) * mMasterGain * mVoice.mVelocity * pulseGate;
 
-            float leftOut = applyGritManifold(midMono);
+            float leftOut = mSignal.applyGritManifold(midMono);
             float rightOut = leftOut;
-            processSpatialFrame(leftOut, rightOut);
+            mSignal.processMidHighSpatial(leftOut, rightOut, mGirth);
             leftOut = juce::jlimit(-1.0f, 1.0f, leftOut + subMono);
             rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
-            leftOut *= mNoteGainEnvelope;
-            rightOut *= mNoteGainEnvelope;
-            leftOut *= gainMult;
-            rightOut *= gainMult;
+            leftOut *= mVoice.mNoteGainEnvelope;
+            rightOut *= mVoice.mNoteGainEnvelope;
+            leftOut *= brake.gainMult;
+            rightOut *= brake.gainMult;
 
-            if (mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
+            if (mVoice.mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
             {
                 leftOut = 0.0f;
                 rightOut = 0.0f;
-                resetSafetyOutputStage();
+                mSignal.resetSafety();
             }
             else
             {
-                leftOut = applySafetyOutputStage(0, leftOut);
+                leftOut = mSignal.processSafety(0, leftOut);
                 if (numOutputChannels > 1)
                 {
-                    rightOut = applySafetyOutputStage(1, rightOut);
+                    rightOut = mSignal.processSafety(1, rightOut);
                 }
             }
 
@@ -371,7 +243,7 @@ public:
                 }
 #endif
                 pulsePhase -= std::floor(pulsePhase);
-                advanceMotifOnPulseWrap();
+                mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
             }
         }
 
@@ -380,27 +252,23 @@ public:
 
     std::array<double, 3> getChildSampleRatesForTests() const noexcept
     {
-        return {
-            subOsc.getSampleRateForTests(),
-            midOscA.getSampleRateForTests(),
-            midOscB.getSampleRateForTests()
-        };
+        return mVoice.getChildSampleRatesForTests();
     }
 
     std::array<float, 2> processSpatialFrameForTests(float inLeft, float inRight)
     {
-        processSpatialFrame(inLeft, inRight);
+        mSignal.processMidHighSpatial(inLeft, inRight, mGirth);
         return { inLeft, inRight };
     }
 
     std::array<float, 3> getCurrentFrequenciesForTests() const noexcept
     {
-        return { mSubFrequencyHz, mMidAFrequencyHz, mMidBFrequencyHz };
+        return mVoice.getCurrentFrequenciesForTests();
     }
 
     std::array<double, 3> getOscillatorPhasesForTests() const noexcept
     {
-        return { subOsc.getPhaseForTests(), midOscA.getPhaseForTests(), midOscB.getPhaseForTests() };
+        return mVoice.getOscillatorPhasesForTests();
     }
 
     float getRateMultiplierForTests() const noexcept
@@ -410,12 +278,52 @@ public:
 
     std::array<bool, 16> getMotifPatternForTests() const noexcept
     {
-        return mMotifPattern;
+        return mMotif.pattern;
+    }
+
+    uint8_t getMotifStepIndexForTests() const noexcept
+    {
+        return mMotif.stepIndex;
+    }
+
+    double getPulsePhaseForTests() const noexcept
+    {
+        return mPulsePhase;
+    }
+
+    double getGatePhaseIncrementForTests() const noexcept
+    {
+        return getGatePhaseIncrement();
+    }
+
+    void advancePulseWrappedRhythmForTests(int numFullPulseWraps)
+    {
+        if (numFullPulseWraps <= 0)
+        {
+            return;
+        }
+
+        double pulsePhase = getBlockStartPulsePhase();
+        const double gatePhaseIncrement = getGatePhaseIncrement();
+
+        for (int w = 0; w < numFullPulseWraps; ++w)
+        {
+            while (pulsePhase < 1.0)
+            {
+                juce::ignoreUnused(advanceGate(pulsePhase));
+                pulsePhase += gatePhaseIncrement;
+            }
+
+            pulsePhase -= std::floor(pulsePhase);
+            mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
+        }
+
+        mPulsePhase = pulsePhase;
     }
 
     void setEntropySeedForTests(int seed) noexcept
     {
-        entropyRandom.setSeed(seed);
+        mSignal.setEntropySeedForTests(seed);
     }
 
     std::vector<float> renderGateEnvelopeForTests(int numSamples)
@@ -437,7 +345,7 @@ public:
             if (pulsePhase >= 1.0)
             {
                 pulsePhase -= std::floor(pulsePhase);
-                advanceMotifOnPulseWrap();
+                mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
             }
         }
 
@@ -447,23 +355,7 @@ public:
 
     std::vector<float> renderGritManifoldForTests(int numSamples, float frequencyHz)
     {
-        std::vector<float> output;
-        if (numSamples <= 0)
-        {
-            return output;
-        }
-
-        output.reserve(static_cast<size_t>(numSamples));
-        for (int i = 0; i < numSamples; ++i)
-        {
-            mShapedGrit = mGritSmoothed.getNextValue();
-            mEntropy = mShapedGrit;
-            const float phase = static_cast<float>(i) * frequencyHz / static_cast<float>(sampleRateHz);
-            const float oscillatorSample = std::sin(juce::MathConstants<float>::twoPi * std::fmod(phase, 1.0f));
-            output.push_back(applyGritManifold(oscillatorSample));
-        }
-
-        return output;
+        return mSignal.renderGritManifoldForTests(sampleRateHz, numSamples, frequencyHz);
     }
 
     std::vector<float> renderFrequencyTraceForTests(int numSamples)
@@ -477,240 +369,18 @@ public:
         trace.reserve(static_cast<size_t>(numSamples));
         for (int i = 0; i < numSamples; ++i)
         {
-            advanceSubDriftLfos();
-            const float currentBase = mCurrentFrequency.getNextValue();
-            mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
-            mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
-            applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(currentBase));
-            advanceThumpSemitoneDecay();
-            trace.push_back(mSubFrequencyHz);
+            mVoice.advanceSubDriftAndFrequencyTraceStep(sampleRateHz);
+            trace.push_back(mVoice.getSubFrequencyHz());
         }
 
         return trace;
     }
 
 private:
-    static uint32_t motifSeedFromNoteAndSkip(int midiNoteNumber, float skipValue) noexcept
-    {
-        return static_cast<uint32_t>(midiNoteNumber)
-            + static_cast<uint32_t>(skipValue * 100000.0f);
-    }
-
-    void captureMotifBarAnchor() noexcept
-    {
-        if (mHasHostPpq && std::isfinite(mCurrentPpqPosition))
-        {
-            mMotifLastBarIndex = static_cast<int64_t>(std::floor(mCurrentPpqPosition / 4.0));
-            mMotifHaveBarAnchor = true;
-        }
-        else
-        {
-            mMotifHaveBarAnchor = false;
-        }
-    }
-
-    void rebuildMotifPattern(int midiNoteNumber, float skipValue) noexcept
-    {
-        mMotifLockedMidiNote = midiNoteNumber;
-        mMotifLockedSkipValue = skipValue;
-
-        if (skipValue <= 0.0f)
-        {
-            mMotifPattern.fill(true);
-            mMotifBypass = true;
-            mMotifStepIndex = 0;
-            mCurrentStepIsSkipped = false;
-            captureMotifBarAnchor();
-            return;
-        }
-
-        mMotifBypass = false;
-        const uint32_t seed = motifSeedFromNoteAndSkip(midiNoteNumber, skipValue);
-        std::mt19937 gen(seed);
-        const double hitProbability = juce::jlimit(0.0, 1.0, 1.0 - static_cast<double>(skipValue));
-        std::bernoulli_distribution hit(hitProbability);
-
-        for (bool& step : mMotifPattern)
-        {
-            step = hit(gen);
-        }
-
-        mMotifStepIndex = 0;
-        captureMotifBarAnchor();
-        mCurrentStepIsSkipped = !mMotifPattern[0];
-    }
-
-    void advanceMotifOnPulseWrap() noexcept
-    {
-        if (mMotifBypass)
-        {
-            mCurrentStepIsSkipped = false;
-            return;
-        }
-
-        if (mHasHostPpq && std::isfinite(mCurrentPpqPosition) && mMotifHaveBarAnchor)
-        {
-            const int64_t currentBar = static_cast<int64_t>(std::floor(mCurrentPpqPosition / 4.0));
-
-            if (currentBar != mMotifLastBarIndex)
-            {
-                mMotifLastBarIndex = currentBar;
-                mMotifStepIndex = 0;
-            }
-            else
-            {
-                mMotifStepIndex = static_cast<uint8_t>((static_cast<int>(mMotifStepIndex) + 1) % 16);
-            }
-        }
-        else
-        {
-            mMotifStepIndex = static_cast<uint8_t>((static_cast<int>(mMotifStepIndex) + 1) % 16);
-        }
-
-        mCurrentStepIsSkipped = !mMotifPattern[static_cast<size_t>(mMotifStepIndex & 15)];
-    }
-
-    static float applyKinkedMacroTaper(float x) noexcept
-    {
-        const float clamped = juce::jlimit(0.0f, 1.0f, x);
-        if (clamped <= 0.5f)
-        {
-            return 2.0f * clamped * clamped;
-        }
-
-        return juce::jlimit(0.0f, 1.0f, 0.5f + (clamped - 0.5f) * 1.35f);
-    }
-
     static float rateIndexToMultiplier(int index) noexcept
     {
         constexpr float multipliers[] { 0.25f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 16.0f };
         return multipliers[juce::jlimit(0, 9, index)];
-    }
-
-    void prepareCrossover()
-    {
-        juce::dsp::ProcessSpec spec {};
-        spec.sampleRate = sampleRateHz;
-        spec.maximumBlockSize = 2048;
-        spec.numChannels = 1;
-
-        for (auto& lowPassFilter : lowPassFilters)
-        {
-            lowPassFilter.reset();
-            lowPassFilter.prepare(spec);
-            lowPassFilter.setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
-            lowPassFilter.setCutoffFrequency(crossoverFrequencyHz);
-        }
-
-        for (auto& highPassFilter : highPassFilters)
-        {
-            highPassFilter.reset();
-            highPassFilter.prepare(spec);
-            highPassFilter.setType(juce::dsp::LinkwitzRileyFilterType::highpass);
-            highPassFilter.setCutoffFrequency(crossoverFrequencyHz);
-        }
-
-        for (auto& upperSplitFilter : upperSplitFilters)
-        {
-            upperSplitFilter.reset();
-            upperSplitFilter.prepare(spec);
-            upperSplitFilter.setType(juce::dsp::LinkwitzRileyFilterType::lowpass);
-            upperSplitFilter.setCutoffFrequency(upperMidBoundaryHz);
-        }
-
-        rightDecorrelator.reset();
-        rightDecorrelator.prepare(spec);
-        rightDecorrelator.setDelay(decorrelationDelaySamples(mGirth));
-    }
-
-    void prepareSafetyOutputStage()
-    {
-        juce::dsp::ProcessSpec spec {};
-        spec.sampleRate = sampleRateHz;
-        spec.maximumBlockSize = 2048;
-        spec.numChannels = 1;
-
-        const auto dcCoeffs = juce::dsp::IIR::Coefficients<float>::makeFirstOrderHighPass(
-            sampleRateHz,
-            static_cast<float>(dcBlockerHz));
-
-        for (size_t i = 0; i < dcBlockers.size(); ++i)
-        {
-            dcBlockers[i].reset();
-            dcBlockers[i].prepare(spec);
-            dcBlockers[i].coefficients = dcCoeffs;
-        }
-
-        for (size_t i = 0; i < safetyOutputHp.size(); ++i)
-        {
-            safetyOutputHp[i].reset();
-            safetyOutputHp[i].prepare(spec);
-            safetyOutputHp[i].setType(juce::dsp::LinkwitzRileyFilterType::highpass);
-            safetyOutputHp[i].setCutoffFrequency(safetyHighPassHz);
-        }
-    }
-
-    float applySafetyOutputStage(int channelIndex, float x) noexcept
-    {
-        float low = 0.0f;
-        float high = 0.0f;
-        safetyOutputHp[static_cast<size_t>(channelIndex)].processSample(0, x, low, high);
-        return dcBlockers[static_cast<size_t>(channelIndex)].processSample(high);
-    }
-
-    void resetSafetyOutputStage() noexcept
-    {
-        for (auto& dc : dcBlockers)
-        {
-            dc.reset();
-        }
-
-        for (auto& hp : safetyOutputHp)
-        {
-            hp.reset();
-        }
-    }
-
-    void processSpatialFrame(float& inOutLeft, float& inOutRight)
-    {
-        const float dryLeft = inOutLeft;
-        const float dryRight = inOutRight;
-
-        float lowLeft = 0.0f;
-        float lowRight = 0.0f;
-        float highLeft = 0.0f;
-        float highRight = 0.0f;
-        lowPassFilters[0].processSample(0, dryLeft, lowLeft, highLeft);
-        lowPassFilters[1].processSample(0, dryRight, lowRight, highRight);
-
-        // Keep explicit HP instances active in parallel per architecture request.
-        juce::ignoreUnused(highPassFilters[0].processSample(0, dryLeft));
-        juce::ignoreUnused(highPassFilters[1].processSample(0, dryRight));
-
-        const float lowMono = 0.5f * (lowLeft + lowRight);
-
-        float upperMidLeft = 0.0f;
-        float upperMidRight = 0.0f;
-        float airLeft = 0.0f;
-        float airRight = 0.0f;
-        upperSplitFilters[0].processSample(0, highLeft, upperMidLeft, airLeft);
-        upperSplitFilters[1].processSample(0, highRight, upperMidRight, airRight);
-
-        const float upperMidMono = 0.5f * (upperMidLeft + upperMidRight);
-
-        rightDecorrelator.pushSample(0, airRight);
-        const float delayedAirRight = rightDecorrelator.popSample(0);
-        const float decorrelatedAirRight = juce::jmap(mGirth, airRight, delayedAirRight);
-
-        const float mid = 0.5f * (airLeft + decorrelatedAirRight);
-        const float sideEnergy = std::abs(airLeft) + std::abs(decorrelatedAirRight);
-        const float sideWeight = juce::jlimit(0.0f, 1.0f, sideEnergy * 2.0f);
-        const float side = 0.5f * (airLeft - decorrelatedAirRight) * (1.0f + mGirth) * sideWeight;
-        const float widenedLeft = upperMidMono + mid + side;
-        const float widenedRight = upperMidMono + mid - side;
-
-        inOutLeft = juce::jlimit(-1.0f, 1.0f, lowMono + widenedLeft);
-        inOutRight = juce::jlimit(-1.0f, 1.0f, lowMono + widenedRight);
     }
 
     double getGatePhaseIncrement() const noexcept
@@ -743,7 +413,7 @@ private:
             return 1.0f;
         }
 
-        if (mCurrentStepIsSkipped)
+        if (mMotif.currentStepSkipped)
         {
             return 0.0f;
         }
@@ -773,167 +443,13 @@ private:
         return gateSlew.process(target);
     }
 
-    float applyGritManifold(float oscillatorSample)
-    {
-        float processed = oscillatorSample;
-
-        const float tear = (entropyRandom.nextFloat() * 2.0f - 1.0f) * std::abs(oscillatorSample) * mShapedGrit * 0.1f;
-        processed += tear;
-
-        if (mShapedGrit > 0.5f)
-        {
-            const float bits = juce::jmap(mShapedGrit, 0.5f, 1.0f, 12.0f, 3.0f);
-            const float quantizationLevels = std::pow(2.0f, bits);
-            processed = std::round(processed * quantizationLevels) / quantizationLevels;
-        }
-
-        if (mShapedGrit > 0.0001f)
-        {
-            const float drive = 1.0f + mShapedGrit * 8.0f;
-            const float clipped = std::tanh(processed * drive);
-            const float makeUpGain = 1.0f / juce::jmax(0.05f, std::tanh(drive));
-            processed = clipped * makeUpGain;
-        }
-
-        return processed;
-    }
-
-    void updateFrequencyRatios()
-    {
-        mMidARatioTarget = (harmony <= 0.5f)
-            ? juce::jmap(harmony, 0.0f, 0.5f, 2.0f, 3.0f)
-            : juce::jmap(harmony, 0.5f, 1.0f, 3.0f, 2.137f);
-        mMidBRatioTarget = (harmony <= 0.5f)
-            ? 4.0f
-            : juce::jmap(harmony, 0.5f, 1.0f, 4.0f, 3.1415f);
-        mMidARatioSmoothed.setTargetValue(mMidARatioTarget);
-        mMidBRatioSmoothed.setTargetValue(mMidBRatioTarget);
-    }
-
-    void applyCurrentBaseFrequency(float baseFrequency)
-    {
-        mSubFrequencyHz = baseFrequency;
-        const float driftRatio = getSubDriftFrequencyRatio();
-        mMidAFrequencyHz = baseFrequency * mCurrentMidARatio * driftRatio;
-        mMidBFrequencyHz = baseFrequency * mCurrentMidBRatio * driftRatio;
-
-        subOsc.setFrequency(mSubFrequencyHz);
-        midOscA.setFrequency(mMidAFrequencyHz);
-        midOscB.setFrequency(mMidBFrequencyHz);
-    }
-
-    float baseFrequencyWithThumpOffset(float baseFrequencyHzIn) const noexcept
-    {
-        return baseFrequencyHzIn * std::pow(2.0f, mThumpSemitones / 12.0f);
-    }
-
-    void advanceThumpSemitoneDecay() noexcept
-    {
-        if (mThumpSemitones <= 0.0f)
-        {
-            return;
-        }
-
-        mThumpSemitones *= mThumpDecayMultiplierPerSample;
-        if (mThumpSemitones < thumpSemitoneFloor)
-        {
-            mThumpSemitones = 0.0f;
-        }
-    }
-
-    void updateThumpDecayCoefficient() noexcept
-    {
-        const double n = static_cast<double>(thumpDurationSeconds) * sampleRateHz;
-        mThumpDecayMultiplierPerSample = static_cast<float>(std::exp(std::log(static_cast<double>(thumpSemitoneFloor)) / n));
-    }
-
-    void advanceSubDriftLfos() noexcept
-    {
-        const double twoPi = juce::MathConstants<double>::twoPi;
-        for (size_t i = 0; i < subDriftLfoHz.size(); ++i)
-        {
-            mSubDriftLfoTheta[i] += twoPi * static_cast<double>(subDriftLfoHz[i]) / sampleRateHz;
-            while (mSubDriftLfoTheta[i] >= twoPi)
-            {
-                mSubDriftLfoTheta[i] -= twoPi;
-            }
-        }
-    }
-
-    float getSubDriftFrequencyRatio() const noexcept
-    {
-        const float s0 = static_cast<float>(std::sin(mSubDriftLfoTheta[0]));
-        const float s1 = static_cast<float>(std::sin(mSubDriftLfoTheta[1]));
-        const float s2 = static_cast<float>(std::sin(mSubDriftLfoTheta[2]));
-        const float sumNorm = (s0 + s1 + s2) * (1.0f / 3.0f);
-        const float cents = mGirth * subDriftMaxCents * sumNorm;
-        return std::pow(2.0f, cents / 1200.0f);
-    }
-
-    float computePulsePeriodMs() const noexcept
-    {
-        const double pulsesPerSecond = (mCurrentBpm / 60.0) * static_cast<double>(mSubdivisionMultiplier);
-        if (pulsesPerSecond <= 1.0e-9)
-        {
-            return 60000.0f;
-        }
-
-        return static_cast<float>(1000.0 / pulsesPerSecond);
-    }
-
-    void updateReleaseEnvelopeCoefficient() noexcept
-    {
-        const float pulsePeriodMs = computePulsePeriodMs();
-        const float periodMinusHardSilenceMs = juce::jmax(0.0f, pulsePeriodMs - adaptivePulseHardSilenceMs);
-        const float maxAllowableReleaseMs = juce::jmin(
-            adaptiveReleaseMaxPeriodFraction * pulsePeriodMs,
-            periodMinusHardSilenceMs);
-
-        const float noteClamped = juce::jlimit(12.0f, 127.0f, mActiveMidiNote);
-        const float stretch = juce::jmap(noteClamped, 16.0f, 96.0f, 1.55f, 0.88f);
-        const float releaseMs = static_cast<float>(releaseTauBaseSeconds * stretch * 1000.0);
-
-        const float effectiveCeiling = juce::jmax(minimumAdaptiveReleaseTauMs, maxAllowableReleaseMs);
-        const float effectiveReleaseMs = std::min(releaseMs, effectiveCeiling);
-
-        const double tauSec = static_cast<double>(effectiveReleaseMs) * 0.001;
-        mReleaseMultiplierPerSample = static_cast<float>(std::exp(-1.0 / (sampleRateHz * juce::jmax(1.0e-6, tauSec))));
-    }
-
-    float decorrelationDelaySamples(float girthAmount) const noexcept
-    {
-        const float delayMs = juce::jmap(juce::jlimit(0.0f, 1.0f, girthAmount), 2.0f, 5.0f);
-        return static_cast<float>(sampleRateHz * (delayMs * 0.001f));
-    }
-
     double sampleRateHz { 44100.0 };
-    float shape { 0.0f };
-    float harmony { 0.0f };
-    float mBaseFrequencyHz { 55.0f };
-    float mVelocity { 0.0f };
     float mMasterGain { 0.5f };
-    float mGrit { 0.0f };
-    float mShapedGrit { 0.0f };
-    float mEntropy { 0.0f };
-    float mShapedShape { 0.0f };
     float mGirth { 0.0f };
     float mPulse { 0.5f };
     float mGateDutyCycle { 0.55f };
-    float mMidARatioTarget { 2.0f };
-    float mMidBRatioTarget { 4.0f };
-    float mCurrentMidARatio { 2.0f };
-    float mCurrentMidBRatio { 4.0f };
     float mSubdivisionMultiplier { 4.0f };
     int mRateIndex { 6 };
-    float mSubFrequencyHz { 55.0f };
-    float mMidAFrequencyHz { 110.0f };
-    float mMidBFrequencyHz { 220.0f };
-    float mNoteGainEnvelope { 0.0f };
-    float mReleaseMultiplierPerSample { 1.0f };
-    float mRisePerSample { 1.0f };
-    float mThumpSemitones { 0.0f };
-    float mThumpDecayMultiplierPerSample { 1.0f };
-    float mActiveMidiNote { 36.0f };
     bool mIsNoteSustaining { false };
 
     double mCurrentBpm { 120.0 };
@@ -941,64 +457,20 @@ private:
     double mPulsePhase { 0.0 };
     bool mIsTransportPlaying { false };
     bool mHasHostPpq { false };
-    bool mCurrentStepIsSkipped { false };
     float mSkipProbability { 0.2f };
-    std::array<bool, 16> mMotifPattern {};
-    uint8_t mMotifStepIndex { 0 };
-    bool mMotifBypass { true };
-    int mMotifLockedMidiNote { -1 };
-    float mMotifLockedSkipValue { -1.0f };
-    int64_t mMotifLastBarIndex { 0 };
-    bool mMotifHaveBarAnchor { false };
 
     SlewLimiter gateSlew;
-    juce::LinearSmoothedValue<float> mCurrentFrequency;
-    juce::LinearSmoothedValue<float> mMidARatioSmoothed;
-    juce::LinearSmoothedValue<float> mMidBRatioSmoothed;
-    juce::LinearSmoothedValue<float> mShapeSmoothed;
-    juce::LinearSmoothedValue<float> mGritSmoothed;
-    std::atomic<float>* mBrakeParameter { nullptr };
-    juce::LinearSmoothedValue<float> mBrakeSmoother;
-    static constexpr double glideTimeSeconds = 0.025;
     static constexpr double macroSmoothingSeconds = 0.01;
     static constexpr double brakeSmootherSeconds = 0.05;
-    static constexpr float brakeFrequencyIdleFloorHz = 20.0f;
-    static constexpr float stutterRateScale = 40.0f;
-    static constexpr float stutterRatePower = 3.0f;
-    static constexpr float stutterSquareDuty = 0.5f;
-    float mStallStutterPhase { 0.0f };
     static constexpr double phaseLockThreshold = 0.01;
-    static constexpr float attackTimeSeconds = 0.005f;
-    static constexpr float releaseTauBaseSeconds = 0.035f;
-    static constexpr float adaptiveReleaseMaxPeriodFraction = 0.8f;
-    static constexpr float adaptivePulseHardSilenceMs = 5.0f;
-    static constexpr float minimumAdaptiveReleaseTauMs = 0.05f;
-    static constexpr float noteEnvelopeSilenceThreshold = 1.0e-6f;
-    static constexpr float thumpDurationSeconds = 0.045f;
-    static constexpr float thumpSemitoneFresh = 18.0f;
-    static constexpr float thumpSemitoneLegato = 18.0f;
-    static constexpr float thumpSemitoneFloor = 1.0e-9f;
-    static constexpr float crossoverFrequencyHz = 150.0f;
-    static constexpr float upperMidBoundaryHz = 400.0f;
-    static constexpr float subDriftMaxCents = 20.0f;
-    static constexpr std::array<float, 3> subDriftLfoHz { 0.31f, 0.73f, 1.13f };
-    std::array<double, 3> mSubDriftLfoTheta {};
     static constexpr float minGateSlewMs = 1.0f;
     static constexpr float gateRetriggerDipSeconds = 0.001f;
     int mGateRetriggerDipSamplesRemaining { 0 };
-    static constexpr float dcBlockerHz = 5.0f;
-    static constexpr float safetyHighPassHz = 25.0f;
-    std::array<juce::dsp::IIR::Filter<float>, 2> dcBlockers;
-    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> safetyOutputHp;
-    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> lowPassFilters;
-    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> highPassFilters;
-    std::array<juce::dsp::LinkwitzRileyFilter<float>, 2> upperSplitFilters;
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> rightDecorrelator { 512 };
-    juce::Random entropyRandom;
 
-    Oscillator subOsc;
-    Oscillator midOscA;
-    Oscillator midOscB;
+    MotifEngine mMotif;
+    VoiceBank mVoice;
+    BrakePhysics mBrake;
+    SignalProcessor mSignal;
 
 #if JUCE_DEBUG
     uint64_t mGlobalAudioSampleCounterForDbg { 0 };
