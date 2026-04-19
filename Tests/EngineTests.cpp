@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_set>
 #include "DSP/RumbleEngine.h"
@@ -25,6 +26,43 @@ TEST_CASE("RumbleEngine prepare propagates sample rate to children", "[engine][p
     REQUIRE(sampleRates[0] == Catch::Approx(kSampleRate));
     REQUIRE(sampleRates[1] == Catch::Approx(kSampleRate));
     REQUIRE(sampleRates[2] == Catch::Approx(kSampleRate));
+}
+
+TEST_CASE("SKIP motif is seeded by MIDI note and SKIP value", "[engine][motif][skip]")
+{
+    constexpr float skip = 0.33f;
+
+    RumbleEngine first;
+    first.prepare(kSampleRate);
+    first.setSkipProbability(skip);
+    first.noteOn(55, 1.0f);
+    const auto motif55 = first.getMotifPatternForTests();
+
+    RumbleEngine again;
+    again.prepare(kSampleRate);
+    again.setSkipProbability(skip);
+    again.noteOn(55, 1.0f);
+    REQUIRE(again.getMotifPatternForTests() == motif55);
+
+    RumbleEngine otherNote;
+    otherNote.prepare(kSampleRate);
+    otherNote.setSkipProbability(skip);
+    otherNote.noteOn(56, 1.0f);
+    REQUIRE(otherNote.getMotifPatternForTests() != motif55);
+
+    std::array<bool, 16> allTrue {};
+    allTrue.fill(true);
+    RumbleEngine bypass;
+    bypass.prepare(kSampleRate);
+    bypass.setSkipProbability(0.0f);
+    bypass.noteOn(55, 1.0f);
+    REQUIRE(bypass.getMotifPatternForTests() == allTrue);
+
+    RumbleEngine restored;
+    restored.prepare(kSampleRate);
+    restored.setSkipProbability(skip);
+    restored.noteOn(55, 1.0f);
+    REQUIRE(restored.getMotifPatternForTests() == motif55);
 }
 
 TEST_CASE("RumbleEngine sums sub and mids deterministically", "[engine][sum][determinism]")
@@ -247,6 +285,7 @@ TEST_CASE("Monophonic note stack keeps newest note after older release", "[engin
     engine.setGirth(0.0f);
     engine.setPulse(0.5f);
     engine.setRate(6);
+    engine.setSkipProbability(0.0f);
     engine.setTransportInfo(120.0, 0.0, true, false);
 
     std::vector<int> activeNotes;

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <vector>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
@@ -51,6 +52,13 @@ public:
         prepareCrossover();
         prepareSafetyOutputStage();
         mCurrentStepIsSkipped = false;
+        mMotifPattern.fill(true);
+        mMotifBypass = true;
+        mMotifStepIndex = 0;
+        mMotifLastBarIndex = 0;
+        mMotifHaveBarAnchor = false;
+        mMotifLockedMidiNote = -1;
+        mMotifLockedSkipValue = -1.0f;
         mSubDriftLfoTheta = {};
         mGateRetriggerDipSamplesRemaining = 0;
         mThumpSemitones = 0.0f;
@@ -121,7 +129,14 @@ public:
 
     void setSkipProbability(float p) noexcept
     {
-        mSkipProbability = juce::jlimit(0.0f, 1.0f, p);
+        const float clamped = juce::jlimit(0.0f, 1.0f, p);
+        const bool changed = (clamped != mSkipProbability);
+        mSkipProbability = clamped;
+
+        if (mIsNoteSustaining && changed)
+        {
+            rebuildMotifPattern(juce::jlimit(0, 127, juce::roundToInt(mActiveMidiNote)), clamped);
+        }
     }
 
     void setMasterGain(float newMasterGain)
@@ -185,6 +200,13 @@ public:
         subOsc.setActive(true);
         midOscA.setActive(true);
         midOscB.setActive(true);
+
+        const int activeNote = juce::jlimit(0, 127, midiNoteNumber);
+        const bool shouldRebuildMotif = (! legatoRetrigger) || (activeNote != mMotifLockedMidiNote);
+        if (shouldRebuildMotif)
+        {
+            rebuildMotifPattern(activeNote, mSkipProbability);
+        }
 
         mIsNoteSustaining = true;
     }
@@ -349,7 +371,7 @@ public:
                 }
 #endif
                 pulsePhase -= std::floor(pulsePhase);
-                mCurrentStepIsSkipped = (entropyRandom.nextFloat() < mSkipProbability);
+                advanceMotifOnPulseWrap();
             }
         }
 
@@ -386,6 +408,11 @@ public:
         return mSubdivisionMultiplier;
     }
 
+    std::array<bool, 16> getMotifPatternForTests() const noexcept
+    {
+        return mMotifPattern;
+    }
+
     void setEntropySeedForTests(int seed) noexcept
     {
         entropyRandom.setSeed(seed);
@@ -410,7 +437,7 @@ public:
             if (pulsePhase >= 1.0)
             {
                 pulsePhase -= std::floor(pulsePhase);
-                mCurrentStepIsSkipped = (entropyRandom.nextFloat() < mSkipProbability);
+                advanceMotifOnPulseWrap();
             }
         }
 
@@ -463,6 +490,86 @@ public:
     }
 
 private:
+    static uint32_t motifSeedFromNoteAndSkip(int midiNoteNumber, float skipValue) noexcept
+    {
+        return static_cast<uint32_t>(midiNoteNumber)
+            + static_cast<uint32_t>(skipValue * 100000.0f);
+    }
+
+    void captureMotifBarAnchor() noexcept
+    {
+        if (mHasHostPpq && std::isfinite(mCurrentPpqPosition))
+        {
+            mMotifLastBarIndex = static_cast<int64_t>(std::floor(mCurrentPpqPosition / 4.0));
+            mMotifHaveBarAnchor = true;
+        }
+        else
+        {
+            mMotifHaveBarAnchor = false;
+        }
+    }
+
+    void rebuildMotifPattern(int midiNoteNumber, float skipValue) noexcept
+    {
+        mMotifLockedMidiNote = midiNoteNumber;
+        mMotifLockedSkipValue = skipValue;
+
+        if (skipValue <= 0.0f)
+        {
+            mMotifPattern.fill(true);
+            mMotifBypass = true;
+            mMotifStepIndex = 0;
+            mCurrentStepIsSkipped = false;
+            captureMotifBarAnchor();
+            return;
+        }
+
+        mMotifBypass = false;
+        const uint32_t seed = motifSeedFromNoteAndSkip(midiNoteNumber, skipValue);
+        std::mt19937 gen(seed);
+        const double hitProbability = juce::jlimit(0.0, 1.0, 1.0 - static_cast<double>(skipValue));
+        std::bernoulli_distribution hit(hitProbability);
+
+        for (bool& step : mMotifPattern)
+        {
+            step = hit(gen);
+        }
+
+        mMotifStepIndex = 0;
+        captureMotifBarAnchor();
+        mCurrentStepIsSkipped = !mMotifPattern[0];
+    }
+
+    void advanceMotifOnPulseWrap() noexcept
+    {
+        if (mMotifBypass)
+        {
+            mCurrentStepIsSkipped = false;
+            return;
+        }
+
+        if (mHasHostPpq && std::isfinite(mCurrentPpqPosition) && mMotifHaveBarAnchor)
+        {
+            const int64_t currentBar = static_cast<int64_t>(std::floor(mCurrentPpqPosition / 4.0));
+
+            if (currentBar != mMotifLastBarIndex)
+            {
+                mMotifLastBarIndex = currentBar;
+                mMotifStepIndex = 0;
+            }
+            else
+            {
+                mMotifStepIndex = static_cast<uint8_t>((static_cast<int>(mMotifStepIndex) + 1) % 16);
+            }
+        }
+        else
+        {
+            mMotifStepIndex = static_cast<uint8_t>((static_cast<int>(mMotifStepIndex) + 1) % 16);
+        }
+
+        mCurrentStepIsSkipped = !mMotifPattern[static_cast<size_t>(mMotifStepIndex & 15)];
+    }
+
     static float applyKinkedMacroTaper(float x) noexcept
     {
         const float clamped = juce::jlimit(0.0f, 1.0f, x);
@@ -836,6 +943,13 @@ private:
     bool mHasHostPpq { false };
     bool mCurrentStepIsSkipped { false };
     float mSkipProbability { 0.2f };
+    std::array<bool, 16> mMotifPattern {};
+    uint8_t mMotifStepIndex { 0 };
+    bool mMotifBypass { true };
+    int mMotifLockedMidiNote { -1 };
+    float mMotifLockedSkipValue { -1.0f };
+    int64_t mMotifLastBarIndex { 0 };
+    bool mMotifHaveBarAnchor { false };
 
     SlewLimiter gateSlew;
     juce::LinearSmoothedValue<float> mCurrentFrequency;

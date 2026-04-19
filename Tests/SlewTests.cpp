@@ -91,6 +91,7 @@ TEST_CASE("Girth 0 and Pulse 0.1 produce a sharp percussive ping", "[slew][lfo][
     RumbleEngine engine;
     engine.prepare(sampleRate);
     engine.setRate(6); // 1/16
+    engine.setSkipProbability(0.0f);
     engine.setGirth(0.0f);
     engine.setPulse(0.1f);
     engine.setTransportInfo(bpm, 0.0, true, false);
