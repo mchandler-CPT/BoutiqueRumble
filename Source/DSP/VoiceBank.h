@@ -6,7 +6,6 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_dsp/juce_dsp.h>
 
-#include "BrakePhysics.h"
 #include "Oscillator.h"
 
 class VoiceBank {
@@ -227,13 +226,6 @@ public:
         mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
         applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(currentBaseFrequency));
         advanceThumpSemitoneDecay();
-    }
-
-    void applyBrakeToOscFrequencies(const BrakePhysics::Frame& brake) noexcept
-    {
-        subOsc.setFrequency(brake.subHz);
-        midOscA.setFrequency(mMidAFrequencyHz * brake.pitchMult * brake.brakeFreqScale);
-        midOscB.setFrequency(mMidBFrequencyHz * brake.pitchMult * brake.brakeFreqScale);
     }
 
     void advanceShapeSmoothedAndApplyToOscillators() noexcept

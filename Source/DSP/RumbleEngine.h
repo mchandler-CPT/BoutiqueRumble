@@ -35,6 +35,8 @@ public:
         mMotif.prepareState();
         mGateRetriggerDipSamplesRemaining = 0;
         mBrake.prepare(sampleRateHz, brakeSmootherSeconds);
+        mBrakeFreeRunningPulseIndex = -1;
+        mBrakeHiccupThisPulse = false;
         noteOff();
 #if JUCE_DEBUG
         mDbgHadPreviousOnset = false;
@@ -166,12 +168,11 @@ public:
 #endif
             mVoice.advanceSubDriftLfos(sampleRateHz);
 
-            const BrakePhysics::Frame brake = mBrake.next(sampleRateHz, mVoice.getSubFrequencyHz());
+            const float brakeIn = mBrake.next(sampleRateHz);
 
             mVoice.tickAmplitudeEnvelope(mIsNoteSustaining);
 
             mVoice.tickPitchGlideAndOrganicFrequencies();
-            mVoice.applyBrakeToOscFrequencies(brake);
             mVoice.advanceShapeSmoothedAndApplyToOscillators();
             mSignal.advanceGritSmoothed();
 
@@ -180,21 +181,24 @@ public:
             float midB = 0.0f;
             mVoice.sampleOscillators(sub, midA, midB);
 
-            const float pulseGateLfo = advanceGate(pulsePhase);
-            const float pulseGate = pulseGateLfo * brake.stutterGate;
+            const float pulseGateLfo = advanceGate(pulsePhase, brakeIn);
+            const float pulseGate = pulseGateLfo;
 
             const float subMono = sub * mMasterGain * mVoice.mVelocity * pulseGate;
             const float midMono = (midA + midB) * mMasterGain * mVoice.mVelocity * pulseGate;
 
+            const float shredT = juce::jlimit(0.0f, 1.0f, 1.0f - brakeIn);
+            const float torqueGrit = (1.0f - brakeIn) * 0.55f + shredT * shredT * 0.15f;
+            const float savedShapedGrit = mSignal.mShapedGrit;
+            mSignal.mShapedGrit = juce::jmin(1.0f, savedShapedGrit + torqueGrit);
             float leftOut = mSignal.applyGritManifold(midMono);
+            mSignal.mShapedGrit = savedShapedGrit;
             float rightOut = leftOut;
             mSignal.processMidHighSpatial(leftOut, rightOut, mGirth);
             leftOut = juce::jlimit(-1.0f, 1.0f, leftOut + subMono);
             rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
             leftOut *= mVoice.mNoteGainEnvelope;
             rightOut *= mVoice.mNoteGainEnvelope;
-            leftOut *= brake.gainMult;
-            rightOut *= brake.gainMult;
 
             if (mVoice.mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
             {
@@ -243,6 +247,7 @@ public:
                 }
 #endif
                 pulsePhase -= std::floor(pulsePhase);
+                refreshBrakeStumbleOnPulseWrap(brakeIn);
                 mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
             }
         }
@@ -308,13 +313,16 @@ public:
 
         for (int w = 0; w < numFullPulseWraps; ++w)
         {
+            float brakeIn = 1.0f;
             while (pulsePhase < 1.0)
             {
-                juce::ignoreUnused(advanceGate(pulsePhase));
+                brakeIn = mBrake.next(sampleRateHz);
+                juce::ignoreUnused(advanceGate(pulsePhase, brakeIn));
                 pulsePhase += gatePhaseIncrement;
             }
 
             pulsePhase -= std::floor(pulsePhase);
+            refreshBrakeStumbleOnPulseWrap(brakeIn);
             mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
         }
 
@@ -340,11 +348,13 @@ public:
 
         for (int i = 0; i < numSamples; ++i)
         {
-            envelope.push_back(advanceGate(pulsePhase));
+            const float brakeIn = mBrake.next(sampleRateHz);
+            envelope.push_back(advanceGate(pulsePhase, brakeIn));
             pulsePhase += gatePhaseIncrement;
             if (pulsePhase >= 1.0)
             {
                 pulsePhase -= std::floor(pulsePhase);
+                refreshBrakeStumbleOnPulseWrap(brakeIn);
                 mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
             }
         }
@@ -406,34 +416,138 @@ private:
         return mPulsePhase;
     }
 
-    float getGateTarget(double pulsePhase) const noexcept
+    static uint32_t stumbleHash(int64_t barKey, uint32_t pulseInBar, uint32_t midiNote) noexcept
+    {
+        uint64_t h = (uint64_t)barKey;
+        h ^= (uint64_t)pulseInBar * 0xd6e8feb866afd25full;
+        h ^= (uint64_t)midiNote * 0x9e3779b97f4a7c15ull;
+        h ^= h >> 33;
+        h *= 0xff51afd7ed558ccdull;
+        h ^= h >> 33;
+        h *= 0xc4ceb9fe1a85ec53ull;
+        h ^= h >> 33;
+        return (uint32_t)h;
+    }
+
+    void refreshBrakeStumbleOnPulseWrap(float brakeIn) noexcept
+    {
+        const int pulsesPerBar = juce::jmax(1, juce::roundToInt(4.0f * mSubdivisionMultiplier));
+        int64_t globalPulse;
+        if (mHasHostPpq && std::isfinite(mCurrentPpqPosition))
+        {
+            globalPulse = (int64_t)std::llround(mCurrentPpqPosition * static_cast<double>(mSubdivisionMultiplier));
+        }
+        else
+        {
+            ++mBrakeFreeRunningPulseIndex;
+            globalPulse = mBrakeFreeRunningPulseIndex;
+        }
+
+        const uint32_t pulseInBar = (uint32_t)(globalPulse % pulsesPerBar);
+        const int64_t barKey = globalPulse / pulsesPerBar;
+        const int note = juce::jlimit(0, 127, juce::roundToInt(mVoice.mActiveMidiNote));
+
+        const uint32_t seed = stumbleHash(barKey, pulseInBar, (uint32_t)note);
+        const float chaos = juce::jlimit(0.0f, 1.0f, 1.0f - brakeIn);
+        const float pHiccup = chaos * 0.21f;
+        const float u = (float)(seed & 0xffffffu) * (1.0f / 16777216.0f);
+
+        mBrakeHiccupThisPulse = (u < pHiccup);
+    }
+
+    uint32_t getFractalStutterHash() const noexcept
+    {
+        const int pulsesPerBar = juce::jmax(1, juce::roundToInt(4.0f * mSubdivisionMultiplier));
+        int64_t globalPulse = 0;
+        if (mHasHostPpq && std::isfinite(mCurrentPpqPosition))
+        {
+            globalPulse = (int64_t)std::llround(mCurrentPpqPosition * static_cast<double>(mSubdivisionMultiplier));
+        }
+        else
+        {
+            globalPulse = juce::jmax((int64_t)0, mBrakeFreeRunningPulseIndex);
+        }
+
+        const uint32_t pulseInBar = (uint32_t)(globalPulse % pulsesPerBar);
+        const int64_t barKey = (globalPulse >= 0) ? (globalPulse / pulsesPerBar) : 0;
+        const int note = juce::jlimit(0, 127, juce::roundToInt(mVoice.mActiveMidiNote));
+        return stumbleHash(barKey, pulseInBar, (uint32_t)note);
+    }
+
+    // Additive thresher: phase-locked 16..128 chops per pulse (1/16..1/128 of pulse period),
+    // Lerp toward a two-level ratchet that never hits 0.0 — SKIP alone silences motif-off steps.
+    float fractalThresherGate(double pulsePhase, float brakeIn) const noexcept
+    {
+        const float t = juce::jlimit(0.0f, 1.0f, 1.0f - brakeIn);
+        if (t <= 1.0e-5f)
+        {
+            return 1.0f;
+        }
+
+        const float blend = t * t;
+        const uint32_t h = getFractalStutterHash();
+        const int nCore = (int)std::lround(juce::jmap(t, 0.0f, 1.0f, 16.0f, 128.0f));
+        const int nChops = juce::jlimit(16, 128, nCore + (int)(h & 3u));
+
+        const double subPhase = std::fmod((double)pulsePhase * static_cast<double>(nChops), 1.0);
+        static constexpr float kThresherHi = 0.985f;
+        static constexpr float kThresherFloor = 0.54f;
+        const float shredValley = juce::jmap(t, 0.0f, 1.0f, kThresherHi, kThresherFloor);
+        const float pat = subPhase < 0.5 ? 1.0f : shredValley;
+
+        return 1.0f + (pat - 1.0f) * blend;
+    }
+
+    float getGateTarget(double pulsePhase, float brakeIn) const noexcept
     {
         if (! mIsTransportPlaying)
         {
             return 1.0f;
         }
 
-        if (mMotif.currentStepSkipped)
+        if (! mMotif.bypass)
         {
-            return 0.0f;
+            if (! mMotif.pattern[static_cast<size_t>(mMotif.stepIndex & 15)])
+            {
+                return 0.0f;
+            }
         }
 
-        const float squareGate = pulsePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
         const double onsetPhaseWidth = juce::jmax(1.0e-9, 4.0 * getGatePhaseIncrement());
         if (pulsePhase < onsetPhaseWidth)
         {
-            return squareGate;
+            const float squareGate = pulsePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
+            return squareGate * fractalThresherGate(pulsePhase, brakeIn);
         }
 
-        const float phase = static_cast<float>(pulsePhase);
+        double phaseForDuty = pulsePhase;
+        if (brakeIn < 1.0f)
+        {
+            const float warpExponent = 1.0f + (1.0f - brakeIn) * 2.0f;
+            phaseForDuty = std::pow((float)pulsePhase, warpExponent);
+        }
+
+        const float squareGate = phaseForDuty < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
+        const float phase = static_cast<float>(phaseForDuty);
         const float sineSwell = 0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi * phase);
         const float girthMorph = juce::jlimit(0.0f, 1.0f, mGirth);
-        return juce::jmap(girthMorph, squareGate, sineSwell);
+        float out = juce::jmap(girthMorph, squareGate, sineSwell);
+
+        if (mBrakeHiccupThisPulse)
+        {
+            constexpr double hiccupPhaseWidth = 1.0 / 64.0;
+            if (pulsePhase < hiccupPhaseWidth)
+            {
+                out = juce::jmax(out, 1.0f);
+            }
+        }
+
+        return out * fractalThresherGate(pulsePhase, brakeIn);
     }
 
-    float advanceGate(double pulsePhase)
+    float advanceGate(double pulsePhase, float brakeIn)
     {
-        float target = getGateTarget(pulsePhase);
+        float target = getGateTarget(pulsePhase, brakeIn);
         if (mGateRetriggerDipSamplesRemaining > 0)
         {
             target = 0.0f;
@@ -471,6 +585,9 @@ private:
     VoiceBank mVoice;
     BrakePhysics mBrake;
     SignalProcessor mSignal;
+
+    int64_t mBrakeFreeRunningPulseIndex { -1 };
+    bool mBrakeHiccupThisPulse { false };
 
 #if JUCE_DEBUG
     uint64_t mGlobalAudioSampleCounterForDbg { 0 };
