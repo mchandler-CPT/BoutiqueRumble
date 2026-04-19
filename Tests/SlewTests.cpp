@@ -48,6 +48,7 @@ TEST_CASE("Subdivision changes gate transition timing", "[slew][subdivision][tim
 
     RumbleEngine eighthEngine;
     eighthEngine.prepare(sampleRate);
+    eighthEngine.setSkipProbability(0.0f);
     eighthEngine.setPulse(0.0f); // sharpest transitions for counting.
     eighthEngine.setSubdivision(2.0f); // 1/8
     eighthEngine.setTransportInfo(120.0, 0.0, true, false);
@@ -56,6 +57,7 @@ TEST_CASE("Subdivision changes gate transition timing", "[slew][subdivision][tim
 
     RumbleEngine sixteenthEngine;
     sixteenthEngine.prepare(sampleRate);
+    sixteenthEngine.setSkipProbability(0.0f);
     sixteenthEngine.setPulse(0.0f);
     sixteenthEngine.setSubdivision(4.0f); // 1/16
     sixteenthEngine.setTransportInfo(120.0, 0.0, true, false);

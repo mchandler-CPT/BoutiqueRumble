@@ -66,6 +66,8 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     RumbleEngine engine;
     constexpr double releaseSampleRate = 44100.0;
     engine.prepare(releaseSampleRate);
+    engine.setTransportInfo(120.0, 0.0, false, false);
+    engine.setRate(0);
     engine.noteOn(kMidiNote, 1.0f);
 
     juce::AudioBuffer<float> preBuffer(2, 4096);

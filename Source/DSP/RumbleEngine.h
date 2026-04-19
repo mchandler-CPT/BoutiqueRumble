@@ -1,7 +1,9 @@
 #pragma once
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
@@ -56,6 +58,11 @@ public:
         mBrakeSmoother.setCurrentAndTargetValue(1.0f);
         mStallStutterPhase = 0.0f;
         noteOff();
+#if JUCE_DEBUG
+        mDbgHadPreviousOnset = false;
+        mDbgLastOnsetSampleIndex = 0;
+        mGlobalAudioSampleCounterForDbg = 0;
+#endif
     }
 
     void setBrakeParameter(std::atomic<float>* param) noexcept
@@ -102,12 +109,14 @@ public:
     void setSubdivision(float multiplier)
     {
         mSubdivisionMultiplier = juce::jlimit(0.25f, 16.0f, multiplier);
+        updateReleaseEnvelopeCoefficient();
     }
 
     void setRate(int index)
     {
         mRateIndex = juce::jlimit(0, 9, index);
         mSubdivisionMultiplier = rateIndexToMultiplier(mRateIndex);
+        updateReleaseEnvelopeCoefficient();
     }
 
     void setSkipProbability(float p) noexcept
@@ -126,12 +135,18 @@ public:
         mCurrentPpqPosition = ppqPosition;
         mIsTransportPlaying = isPlaying;
         mHasHostPpq = hasPpqPosition;
+        updateReleaseEnvelopeCoefficient();
     }
 
     void noteOn(int midiNoteNumber, float velocity)
     {
         const bool voiceAlreadyActive = mIsNoteSustaining || mNoteGainEnvelope > 0.0f;
         const bool legatoRetrigger = mIsNoteSustaining;
+
+        if (! legatoRetrigger)
+        {
+            mNoteGainEnvelope = 0.0f;
+        }
 
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
@@ -188,11 +203,16 @@ public:
             return;
         }
 
-        double gatePhase = getBlockStartGatePhase();
+        updateReleaseEnvelopeCoefficient();
+
+        double pulsePhase = getBlockStartPulsePhase();
         const double gatePhaseIncrement = getGatePhaseIncrement();
 
         for (int sample = 0; sample < numSamples; ++sample)
         {
+#if JUCE_DEBUG
+            ++mGlobalAudioSampleCounterForDbg;
+#endif
             advanceSubDriftLfos();
 
             const float brakeTarget = (mBrakeParameter != nullptr) ? mBrakeParameter->load() : 1.0f;
@@ -266,7 +286,7 @@ public:
             const float sub = subOsc.getNextSample() * 0.6f;
             const float midA = midOscA.getNextSample() * 0.2f;
             const float midB = midOscB.getNextSample() * 0.2f;
-            const float pulseGateLfo = advanceGate(gatePhase);
+            const float pulseGateLfo = advanceGate(pulsePhase);
             const float pulseGate = pulseGateLfo * brakeStutterGate;
 
             const float subMono = sub * mMasterGain * mVelocity * pulseGate;
@@ -307,15 +327,33 @@ public:
                 buffer.setSample(channel, sample, 0.0f);
             }
 
-            gatePhase += gatePhaseIncrement;
-            if (gatePhase >= 1.0)
+            pulsePhase += gatePhaseIncrement;
+            if (pulsePhase >= 1.0)
             {
-                gatePhase -= std::floor(gatePhase);
+#if JUCE_DEBUG
+                if (mIsTransportPlaying)
+                {
+                    if (mDbgHadPreviousOnset)
+                    {
+                        const double dtMs = static_cast<double>(mGlobalAudioSampleCounterForDbg - mDbgLastOnsetSampleIndex)
+                            * (1000.0 / sampleRateHz);
+                        ++mDbgOnsetLogCounter;
+                        if ((mDbgOnsetLogCounter % 8u) == 0u)
+                        {
+                            DBG("[RumbleEngine] timeBetweenOnsets = " << dtMs << " ms @ Girth=" << mGirth);
+                        }
+                    }
+
+                    mDbgHadPreviousOnset = true;
+                    mDbgLastOnsetSampleIndex = mGlobalAudioSampleCounterForDbg;
+                }
+#endif
+                pulsePhase -= std::floor(pulsePhase);
                 mCurrentStepIsSkipped = (entropyRandom.nextFloat() < mSkipProbability);
             }
         }
 
-        mInternalGatePhase = gatePhase;
+        mPulsePhase = pulsePhase;
     }
 
     std::array<double, 3> getChildSampleRatesForTests() const noexcept
@@ -362,21 +400,21 @@ public:
         }
 
         envelope.reserve(static_cast<size_t>(numSamples));
-        double gatePhase = getBlockStartGatePhase();
+        double pulsePhase = getBlockStartPulsePhase();
         const double gatePhaseIncrement = getGatePhaseIncrement();
 
         for (int i = 0; i < numSamples; ++i)
         {
-            envelope.push_back(advanceGate(gatePhase));
-            gatePhase += gatePhaseIncrement;
-            if (gatePhase >= 1.0)
+            envelope.push_back(advanceGate(pulsePhase));
+            pulsePhase += gatePhaseIncrement;
+            if (pulsePhase >= 1.0)
             {
-                gatePhase -= std::floor(gatePhase);
+                pulsePhase -= std::floor(pulsePhase);
                 mCurrentStepIsSkipped = (entropyRandom.nextFloat() < mSkipProbability);
             }
         }
 
-        mInternalGatePhase = gatePhase;
+        mPulsePhase = pulsePhase;
         return envelope;
     }
 
@@ -573,25 +611,25 @@ private:
         return ((mCurrentBpm / 60.0) * static_cast<double>(mSubdivisionMultiplier)) / sampleRateHz;
     }
 
-    double getBlockStartGatePhase() const noexcept
+    double getBlockStartPulsePhase() const noexcept
     {
         if (mHasHostPpq)
         {
             const double hostPhase = std::fmod(mCurrentPpqPosition * static_cast<double>(mSubdivisionMultiplier), 1.0);
-            const double diff = std::abs(hostPhase - mInternalGatePhase);
+            const double diff = std::abs(hostPhase - mPulsePhase);
             const double wrappedDiff = juce::jmin(diff, 1.0 - diff);
             if (wrappedDiff < phaseLockThreshold)
             {
-                return mInternalGatePhase;
+                return mPulsePhase;
             }
 
             return hostPhase;
         }
 
-        return mInternalGatePhase;
+        return mPulsePhase;
     }
 
-    float getGateTarget(double gatePhase) const noexcept
+    float getGateTarget(double pulsePhase) const noexcept
     {
         if (! mIsTransportPlaying)
         {
@@ -603,16 +641,22 @@ private:
             return 0.0f;
         }
 
-        const float squareGate = gatePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
-        const float phase = static_cast<float>(gatePhase);
+        const float squareGate = pulsePhase < static_cast<double>(mGateDutyCycle) ? 1.0f : 0.0f;
+        const double onsetPhaseWidth = juce::jmax(1.0e-9, 4.0 * getGatePhaseIncrement());
+        if (pulsePhase < onsetPhaseWidth)
+        {
+            return squareGate;
+        }
+
+        const float phase = static_cast<float>(pulsePhase);
         const float sineSwell = 0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi * phase);
         const float girthMorph = juce::jlimit(0.0f, 1.0f, mGirth);
         return juce::jmap(girthMorph, squareGate, sineSwell);
     }
 
-    float advanceGate(double gatePhase)
+    float advanceGate(double pulsePhase)
     {
-        float target = getGateTarget(gatePhase);
+        float target = getGateTarget(pulsePhase);
         if (mGateRetriggerDipSamplesRemaining > 0)
         {
             target = 0.0f;
@@ -719,12 +763,34 @@ private:
         return std::pow(2.0f, cents / 1200.0f);
     }
 
+    float computePulsePeriodMs() const noexcept
+    {
+        const double pulsesPerSecond = (mCurrentBpm / 60.0) * static_cast<double>(mSubdivisionMultiplier);
+        if (pulsesPerSecond <= 1.0e-9)
+        {
+            return 60000.0f;
+        }
+
+        return static_cast<float>(1000.0 / pulsesPerSecond);
+    }
+
     void updateReleaseEnvelopeCoefficient() noexcept
     {
+        const float pulsePeriodMs = computePulsePeriodMs();
+        const float periodMinusHardSilenceMs = juce::jmax(0.0f, pulsePeriodMs - adaptivePulseHardSilenceMs);
+        const float maxAllowableReleaseMs = juce::jmin(
+            adaptiveReleaseMaxPeriodFraction * pulsePeriodMs,
+            periodMinusHardSilenceMs);
+
         const float noteClamped = juce::jlimit(12.0f, 127.0f, mActiveMidiNote);
         const float stretch = juce::jmap(noteClamped, 16.0f, 96.0f, 1.55f, 0.88f);
-        const double tauSec = static_cast<double>(releaseTauBaseSeconds) * static_cast<double>(stretch);
-        mReleaseMultiplierPerSample = static_cast<float>(std::exp(-1.0 / (sampleRateHz * tauSec)));
+        const float releaseMs = static_cast<float>(releaseTauBaseSeconds * stretch * 1000.0);
+
+        const float effectiveCeiling = juce::jmax(minimumAdaptiveReleaseTauMs, maxAllowableReleaseMs);
+        const float effectiveReleaseMs = std::min(releaseMs, effectiveCeiling);
+
+        const double tauSec = static_cast<double>(effectiveReleaseMs) * 0.001;
+        mReleaseMultiplierPerSample = static_cast<float>(std::exp(-1.0 / (sampleRateHz * juce::jmax(1.0e-6, tauSec))));
     }
 
     float decorrelationDelaySamples(float girthAmount) const noexcept
@@ -765,7 +831,7 @@ private:
 
     double mCurrentBpm { 120.0 };
     double mCurrentPpqPosition { 0.0 };
-    double mInternalGatePhase { 0.0 };
+    double mPulsePhase { 0.0 };
     bool mIsTransportPlaying { false };
     bool mHasHostPpq { false };
     bool mCurrentStepIsSkipped { false };
@@ -790,9 +856,12 @@ private:
     static constexpr double phaseLockThreshold = 0.01;
     static constexpr float attackTimeSeconds = 0.005f;
     static constexpr float releaseTauBaseSeconds = 0.035f;
+    static constexpr float adaptiveReleaseMaxPeriodFraction = 0.8f;
+    static constexpr float adaptivePulseHardSilenceMs = 5.0f;
+    static constexpr float minimumAdaptiveReleaseTauMs = 0.05f;
     static constexpr float noteEnvelopeSilenceThreshold = 1.0e-6f;
     static constexpr float thumpDurationSeconds = 0.045f;
-    static constexpr float thumpSemitoneFresh = 36.0f;
+    static constexpr float thumpSemitoneFresh = 18.0f;
     static constexpr float thumpSemitoneLegato = 18.0f;
     static constexpr float thumpSemitoneFloor = 1.0e-9f;
     static constexpr float crossoverFrequencyHz = 150.0f;
@@ -816,4 +885,11 @@ private:
     Oscillator subOsc;
     Oscillator midOscA;
     Oscillator midOscB;
+
+#if JUCE_DEBUG
+    uint64_t mGlobalAudioSampleCounterForDbg { 0 };
+    uint64_t mDbgLastOnsetSampleIndex { 0 };
+    uint32_t mDbgOnsetLogCounter { 0 };
+    bool mDbgHadPreviousOnset { false };
+#endif
 };
