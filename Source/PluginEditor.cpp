@@ -4,7 +4,8 @@
 BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (BoutiqueRumbleAudioProcessor& p)
     : AudioProcessorEditor (&p),
       audioProcessor (p),
-      keyboardComponent (audioProcessor.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
+      keyboardComponent (audioProcessor.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard),
+      waveformVisualiser (1)
 {
     setLookAndFeel(&boutiqueLookAndFeel);
 
@@ -119,6 +120,12 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     keyboardComponent.setAvailableRange(0, 96); // C-2..C6 extended performance range
     keyboardComponent.setLowestVisibleKey(0);
 
+    waveformVisualiser.setBufferSize(512);
+    waveformVisualiser.setSamplesPerBlock(16);
+    waveformVisualiser.setRepaintRate(30);
+    waveformVisualiser.setColours(juce::Colour(0xff1a1918), juce::Colour(0xffc7bb3f));
+    addAndMakeVisible(waveformVisualiser);
+
     bpmLabel.setVisible(true);
     bpmBox.setVisible(true);
     bpmBox.setEnabled(! syncLightButton.getToggleState());
@@ -149,7 +156,7 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     auto bounds = getLocalBounds().reduced(12);
     bounds.removeFromTop(52);
 
-    auto keyboardArea = bounds.removeFromBottom(88);
+    auto keyboardArea = bounds.removeFromBottom(84);
     const int keyboardStart = 0;
     const int keyboardEnd = 96;
     int whiteKeyCount = 0;
@@ -164,6 +171,9 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
         keyboardComponent.setKeyWidth(targetKeyWidth);
     }
     keyboardComponent.setBounds(keyboardArea);
+
+    auto visualizerArea = bounds.removeFromBottom(54).reduced(6, 4);
+    waveformVisualiser.setBounds(visualizerArea);
 
     auto groupedArea = bounds.reduced(6);
     const int gap = 10;

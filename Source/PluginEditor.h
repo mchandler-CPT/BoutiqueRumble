@@ -20,6 +20,7 @@ private:
     BoutiqueRumbleAudioProcessor& audioProcessor;
     BoutiqueLookAndFeel boutiqueLookAndFeel;
     juce::MidiKeyboardComponent keyboardComponent;
+    juce::AudioVisualiserComponent waveformVisualiser;
 
     juce::Slider pulseSlider;
     juce::Slider shapeSlider;

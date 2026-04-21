@@ -24,43 +24,30 @@ public:
     float mMidAFrequencyHz { 110.0f };
     float mMidBFrequencyHz { 220.0f };
     float mNoteGainEnvelope { 0.0f };
-    float mReleaseMultiplierPerSample { 1.0f };
-    float mRisePerSample { 1.0f };
-    float mThumpSemitones { 0.0f };
-    float mThumpDecayMultiplierPerSample { 1.0f };
+    float mAttackStepPerSample { 1.0f };
+    float mReleaseStepPerSample { 1.0f };
     float mGirthDrift { 0.0f };
 
-    juce::LinearSmoothedValue<float> mCurrentFrequency;
     juce::LinearSmoothedValue<float> mMidARatioSmoothed;
     juce::LinearSmoothedValue<float> mMidBRatioSmoothed;
     juce::LinearSmoothedValue<float> mShapeSmoothed;
 
     std::array<double, 3> mSubDriftLfoTheta {};
 
-    Oscillator subOsc;
-    Oscillator midOscA;
-    Oscillator midOscB;
-
     static float applyKinkedMacroTaper(float x) noexcept
     {
         const float clamped = juce::jlimit(0.0f, 1.0f, x);
         if (clamped <= 0.5f)
-        {
             return 2.0f * clamped * clamped;
-        }
-
         return juce::jlimit(0.0f, 1.0f, 0.5f + (clamped - 0.5f) * 1.35f);
     }
 
     static constexpr double glideTimeSeconds = 0.025;
     static constexpr double macroSmoothingSeconds = 0.01;
-    static constexpr float thumpDurationSeconds = 0.045f;
-    static constexpr float thumpSemitoneFresh = 18.0f;
-    static constexpr float thumpSemitoneLegato = 18.0f;
-    static constexpr float thumpSemitoneFloor = 1.0e-9f;
     static constexpr float subDriftMaxCents = 20.0f;
     static constexpr std::array<float, 3> subDriftLfoHz { 0.31f, 0.73f, 1.13f };
-    static constexpr float attackTimeSeconds = 0.005f;
+    static constexpr float attackTimeSeconds = 0.002f;
+    static constexpr float releaseTimeSeconds = 0.005f;
     static constexpr float noteEnvelopeSilenceThreshold = 1.0e-6f;
 
     void prepare(double sampleRateHz, float shapeIn, float harmonyIn, float girthIn)
@@ -69,40 +56,46 @@ public:
         shape = juce::jlimit(0.0f, 1.0f, shapeIn);
         mGirthDrift = juce::jlimit(0.0f, 1.0f, girthIn);
 
-        mRisePerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * attackTimeSeconds));
-        updateThumpDecayCoefficient(sampleRateHz);
+        mAttackStepPerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * attackTimeSeconds));
+        updateReleaseEnvelopeCoefficient(sampleRateHz, 120.0, 4.0f);
 
-        subOsc.prepare(sampleRateHz);
-        midOscA.prepare(sampleRateHz);
-        midOscB.prepare(sampleRateHz);
+        activeVoice.sub.prepare(sampleRateHz);
+        activeVoice.midA.prepare(sampleRateHz);
+        activeVoice.midB.prepare(sampleRateHz);
+        shadowVoice.sub.prepare(sampleRateHz);
+        shadowVoice.midA.prepare(sampleRateHz);
+        shadowVoice.midB.prepare(sampleRateHz);
 
         updateFrequencyRatios();
-        mCurrentFrequency.reset(sampleRateHz, glideTimeSeconds);
-        mCurrentFrequency.setCurrentAndTargetValue(mBaseFrequencyHz);
         mMidARatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
         mMidBRatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
         mMidARatioSmoothed.setCurrentAndTargetValue(mMidARatioTarget);
         mMidBRatioSmoothed.setCurrentAndTargetValue(mMidBRatioTarget);
         mCurrentMidARatio = mMidARatioSmoothed.getCurrentValue();
         mCurrentMidBRatio = mMidBRatioSmoothed.getCurrentValue();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
+
+        initVoice(activeVoice, mBaseFrequencyHz, 0.0f);
+        initVoice(shadowVoice, mBaseFrequencyHz, 0.0f);
+        activeVoice.active = false;
+        shadowVoice.active = false;
 
         mShapeSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
         mShapeSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(shape));
         mShapedShape = mShapeSmoothed.getCurrentValue();
-        subOsc.setShape(mShapedShape);
-        midOscA.setShape(mShapedShape);
-        midOscB.setShape(mShapedShape);
+        applyShapeToVoice(activeVoice);
+        applyShapeToVoice(shadowVoice);
 
         mSubDriftLfoTheta = {};
-        mThumpSemitones = 0.0f;
+        mVelocity = 0.0f;
+        mNoteGainEnvelope = 0.0f;
     }
 
     void setHarmony(float newHarmony)
     {
         harmony = juce::jlimit(0.0f, 1.0f, newHarmony);
         updateFrequencyRatios();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
+        updateVoiceFrequencies(activeVoice);
+        updateVoiceFrequencies(shadowVoice);
     }
 
     void setShape(float newShape)
@@ -123,67 +116,44 @@ public:
 
     void updateReleaseEnvelopeCoefficient(double sampleRateHz, double currentBpm, float subdivisionMultiplier)
     {
-        const float pulsePeriodMs = computePulsePeriodMs(currentBpm, subdivisionMultiplier);
-        const float periodMinusHardSilenceMs = juce::jmax(0.0f, pulsePeriodMs - adaptivePulseHardSilenceMs);
-        const float maxAllowableReleaseMs = juce::jmin(
-            adaptiveReleaseMaxPeriodFraction * pulsePeriodMs,
-            periodMinusHardSilenceMs);
-
-        const float noteClamped = juce::jlimit(12.0f, 127.0f, mActiveMidiNote);
-        const float stretch = juce::jmap(noteClamped, 16.0f, 96.0f, 1.55f, 0.88f);
-        const float releaseMs = static_cast<float>(releaseTauBaseSeconds * stretch * 1000.0);
-
-        const float effectiveCeiling = juce::jmax(minimumAdaptiveReleaseTauMs, maxAllowableReleaseMs);
-        const float effectiveReleaseMs = std::min(releaseMs, effectiveCeiling);
-
-        const double tauSec = static_cast<double>(effectiveReleaseMs) * 0.001;
-        mReleaseMultiplierPerSample = static_cast<float>(std::exp(-1.0 / (sampleRateHz * juce::jmax(1.0e-6, tauSec))));
+        juce::ignoreUnused(currentBpm, subdivisionMultiplier);
+        mReleaseStepPerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
     }
 
     void noteOn(int midiNoteNumber, float velocity, bool legatoRetrigger, bool voiceAlreadyActive,
                 double hostSampleRateHz, double currentBpm, float subdivisionMultiplier)
     {
-        if (! legatoRetrigger)
+        juce::ignoreUnused(legatoRetrigger, voiceAlreadyActive, hostSampleRateHz, currentBpm, subdivisionMultiplier);
+
+        if (activeVoice.active && activeVoice.envelope > noteEnvelopeSilenceThreshold)
         {
-            mNoteGainEnvelope = 0.0f;
+            shadowVoice = activeVoice;
+            shadowVoice.releasing = true;
+            shadowVoice.attacking = false;
+            shadowVoice.releaseProgress = 0.0f;
+            shadowVoice.releaseStartLevel = juce::jlimit(0.0f, 1.0f, shadowVoice.envelope);
+            shadowVoice.active = true;
         }
 
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
         mActiveMidiNote = static_cast<float>(midiNoteNumber);
-        mVelocity = juce::jlimit(0.0f, 1.0f, velocity);
 
-        if (voiceAlreadyActive)
-        {
-            mCurrentFrequency.setTargetValue(mBaseFrequencyHz);
-        }
-        else
-        {
-            mCurrentFrequency.setCurrentAndTargetValue(mBaseFrequencyHz);
-            if (mNoteGainEnvelope <= 0.0f)
-            {
-                subOsc.resetPhase();
-                midOscA.resetPhase();
-                midOscB.resetPhase();
-            }
-        }
+        initVoice(activeVoice, mBaseFrequencyHz, juce::jlimit(0.0f, 1.0f, velocity));
+        activeVoice.active = true;
+        activeVoice.attacking = true;
+        activeVoice.releasing = false;
 
-        if (legatoRetrigger)
-        {
-            mThumpSemitones = juce::jmax(mThumpSemitones, thumpSemitoneLegato);
-        }
-        else
-        {
-            mThumpSemitones = thumpSemitoneFresh;
-        }
+        updateVoiceFrequencies(activeVoice);
+        activeVoice.sub.resetPhase(0.0f);
+        activeVoice.midA.resetPhase(0.0f);
+        activeVoice.midB.resetPhase(0.0f);
+        activeVoice.sub.setActive(true);
+        activeVoice.midA.setActive(true);
+        activeVoice.midB.setActive(true);
 
-        updateReleaseEnvelopeCoefficient(hostSampleRateHz, currentBpm, subdivisionMultiplier);
-        updateFrequencyRatios();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(mCurrentFrequency.getCurrentValue()));
-
-        subOsc.setActive(true);
-        midOscA.setActive(true);
-        midOscB.setActive(true);
+        mVelocity = 1.0f;
+        mNoteGainEnvelope = 1.0f;
     }
 
     void advanceSubDriftLfos(double sampleRateHz) noexcept
@@ -193,54 +163,51 @@ public:
         {
             mSubDriftLfoTheta[i] += twoPi * static_cast<double>(subDriftLfoHz[i]) / sampleRateHz;
             while (mSubDriftLfoTheta[i] >= twoPi)
-            {
                 mSubDriftLfoTheta[i] -= twoPi;
-            }
         }
     }
 
     void tickAmplitudeEnvelope(bool isNoteSustaining)
     {
-        if (isNoteSustaining)
+        if (activeVoice.active && ! isNoteSustaining && ! activeVoice.releasing)
         {
-            mNoteGainEnvelope = juce::jmin(1.0f, mNoteGainEnvelope + mRisePerSample);
+            activeVoice.releasing = true;
+            activeVoice.attacking = false;
+            activeVoice.releaseProgress = 0.0f;
+            activeVoice.releaseStartLevel = juce::jlimit(0.0f, 1.0f, activeVoice.envelope);
         }
-        else if (mNoteGainEnvelope > 0.0f)
-        {
-            mNoteGainEnvelope *= mReleaseMultiplierPerSample;
-            if (mNoteGainEnvelope < noteEnvelopeSilenceThreshold)
-            {
-                mNoteGainEnvelope = 0.0f;
-                mVelocity = 0.0f;
-                subOsc.setActive(false);
-                midOscA.setActive(false);
-                midOscB.setActive(false);
-            }
-        }
+
+        updateVoiceEnvelope(activeVoice);
+        updateVoiceEnvelope(shadowVoice);
+
+        const bool anyActive = activeVoice.active || shadowVoice.active;
+        mVelocity = anyActive ? 1.0f : 0.0f;
+        mNoteGainEnvelope = anyActive ? 1.0f : 0.0f;
     }
 
     void tickPitchGlideAndOrganicFrequencies()
     {
-        const float currentBaseFrequency = mCurrentFrequency.getNextValue();
         mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
         mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
-        applyCurrentBaseFrequency(baseFrequencyWithThumpOffset(currentBaseFrequency));
-        advanceThumpSemitoneDecay();
+        updateVoiceFrequencies(activeVoice);
+        updateVoiceFrequencies(shadowVoice);
     }
 
     void advanceShapeSmoothedAndApplyToOscillators() noexcept
     {
         mShapedShape = mShapeSmoothed.getNextValue();
-        subOsc.setShape(mShapedShape);
-        midOscA.setShape(mShapedShape);
-        midOscB.setShape(mShapedShape);
+        applyShapeToVoice(activeVoice);
+        applyShapeToVoice(shadowVoice);
     }
 
     void sampleOscillators(float& sub, float& midA, float& midB) noexcept
     {
-        sub = subOsc.getNextSample() * 0.6f;
-        midA = midOscA.getNextSample() * 0.2f;
-        midB = midOscB.getNextSample() * 0.2f;
+        sub = 0.0f;
+        midA = 0.0f;
+        midB = 0.0f;
+
+        sampleVoice(activeVoice, sub, midA, midB);
+        sampleVoice(shadowVoice, sub, midA, midB);
     }
 
     void advanceSubDriftAndFrequencyTraceStep(double sampleRateHz)
@@ -252,9 +219,9 @@ public:
     std::array<double, 3> getChildSampleRatesForTests() const noexcept
     {
         return {
-            subOsc.getSampleRateForTests(),
-            midOscA.getSampleRateForTests(),
-            midOscB.getSampleRateForTests()
+            activeVoice.sub.getSampleRateForTests(),
+            activeVoice.midA.getSampleRateForTests(),
+            activeVoice.midB.getSampleRateForTests()
         };
     }
 
@@ -265,24 +232,86 @@ public:
 
     std::array<double, 3> getOscillatorPhasesForTests() const noexcept
     {
-        return { subOsc.getPhaseForTests(), midOscA.getPhaseForTests(), midOscB.getPhaseForTests() };
+        return {
+            activeVoice.sub.getPhaseForTests(),
+            activeVoice.midA.getPhaseForTests(),
+            activeVoice.midB.getPhaseForTests()
+        };
     }
 
 private:
-    static constexpr float releaseTauBaseSeconds = 0.035f;
-    static constexpr float adaptiveReleaseMaxPeriodFraction = 0.8f;
-    static constexpr float adaptivePulseHardSilenceMs = 5.0f;
-    static constexpr float minimumAdaptiveReleaseTauMs = 0.05f;
-
-    static float computePulsePeriodMs(double currentBpm, float subdivisionMultiplier) noexcept
+    static float cosineSCurve(float progress) noexcept
     {
-        const double pulsesPerSecond = (currentBpm / 60.0) * static_cast<double>(subdivisionMultiplier);
-        if (pulsesPerSecond <= 1.0e-9)
-        {
-            return 60000.0f;
-        }
+        const float p = juce::jlimit(0.0f, 1.0f, progress);
+        return 0.5f * (1.0f - std::cos(juce::MathConstants<float>::pi * p));
+    }
 
-        return static_cast<float>(1000.0 / pulsesPerSecond);
+    struct VoiceSlot
+    {
+        Oscillator sub;
+        Oscillator midA;
+        Oscillator midB;
+        float baseFrequencyHz { 55.0f };
+        float velocity { 0.0f };
+        float envelope { 0.0f };
+        float attackProgress { 0.0f };
+        float releaseProgress { 0.0f };
+        float releaseStartLevel { 0.0f };
+        bool active { false };
+        bool attacking { false };
+        bool releasing { false };
+    };
+
+    VoiceSlot activeVoice;
+    VoiceSlot shadowVoice;
+
+    void initVoice(VoiceSlot& voice, float baseFrequencyHz, float velocity) noexcept
+    {
+        voice.baseFrequencyHz = baseFrequencyHz;
+        voice.velocity = velocity;
+        voice.envelope = 0.0f;
+        voice.attackProgress = 0.0f;
+        voice.releaseProgress = 0.0f;
+        voice.releaseStartLevel = 0.0f;
+    }
+
+    void applyShapeToVoice(VoiceSlot& voice) noexcept
+    {
+        voice.sub.setShape(mShapedShape);
+        voice.midA.setShape(mShapedShape);
+        voice.midB.setShape(mShapedShape);
+    }
+
+    void updateVoiceEnvelope(VoiceSlot& voice) noexcept
+    {
+        if (! voice.active)
+            return;
+
+        if (voice.attacking)
+        {
+            voice.attackProgress = juce::jmin(1.0f, voice.attackProgress + mAttackStepPerSample);
+            voice.envelope = cosineSCurve(voice.attackProgress);
+            if (voice.attackProgress >= 1.0f)
+            {
+                voice.envelope = 1.0f;
+                voice.attacking = false;
+            }
+        }
+        else if (voice.releasing)
+        {
+            voice.releaseProgress = juce::jmin(1.0f, voice.releaseProgress + mReleaseStepPerSample);
+            voice.envelope = voice.releaseStartLevel * (1.0f - cosineSCurve(voice.releaseProgress));
+            if (voice.releaseProgress >= 1.0f || voice.envelope <= noteEnvelopeSilenceThreshold)
+            {
+                voice.envelope = 0.0f;
+                voice.active = false;
+                voice.releasing = false;
+                voice.attacking = false;
+                voice.sub.setActive(false);
+                voice.midA.setActive(false);
+                voice.midB.setActive(false);
+            }
+        }
     }
 
     void updateFrequencyRatios()
@@ -297,41 +326,40 @@ private:
         mMidBRatioSmoothed.setTargetValue(mMidBRatioTarget);
     }
 
-    void applyCurrentBaseFrequency(float baseFrequency)
+    void updateVoiceFrequencies(VoiceSlot& voice) noexcept
     {
-        mSubFrequencyHz = baseFrequency;
-        const float driftRatio = getSubDriftFrequencyRatio();
-        mMidAFrequencyHz = baseFrequency * mCurrentMidARatio * driftRatio;
-        mMidBFrequencyHz = baseFrequency * mCurrentMidBRatio * driftRatio;
-
-        subOsc.setFrequency(mSubFrequencyHz);
-        midOscA.setFrequency(mMidAFrequencyHz);
-        midOscB.setFrequency(mMidBFrequencyHz);
-    }
-
-    float baseFrequencyWithThumpOffset(float baseFrequencyHzIn) const noexcept
-    {
-        return baseFrequencyHzIn * std::pow(2.0f, mThumpSemitones / 12.0f);
-    }
-
-    void advanceThumpSemitoneDecay() noexcept
-    {
-        if (mThumpSemitones <= 0.0f)
-        {
+        if (! voice.active)
             return;
-        }
 
-        mThumpSemitones *= mThumpDecayMultiplierPerSample;
-        if (mThumpSemitones < thumpSemitoneFloor)
+        const float driftRatio = getSubDriftFrequencyRatio();
+        const float subHz = voice.baseFrequencyHz;
+        const float midAHz = voice.baseFrequencyHz * mCurrentMidARatio * driftRatio;
+        const float midBHz = voice.baseFrequencyHz * mCurrentMidBRatio * driftRatio;
+
+        voice.sub.setFrequency(subHz);
+        voice.midA.setFrequency(midAHz);
+        voice.midB.setFrequency(midBHz);
+
+        if (&voice == &activeVoice)
         {
-            mThumpSemitones = 0.0f;
+            mSubFrequencyHz = subHz;
+            mMidAFrequencyHz = midAHz;
+            mMidBFrequencyHz = midBHz;
         }
     }
 
-    void updateThumpDecayCoefficient(double sampleRateHz) noexcept
+    static void sampleVoice(VoiceSlot& voice, float& sub, float& midA, float& midB) noexcept
     {
-        const double n = static_cast<double>(thumpDurationSeconds) * sampleRateHz;
-        mThumpDecayMultiplierPerSample = static_cast<float>(std::exp(std::log(static_cast<double>(thumpSemitoneFloor)) / n));
+        if (! voice.active)
+            return;
+
+        const float gain = voice.envelope * voice.velocity;
+        if (gain <= noteEnvelopeSilenceThreshold)
+            return;
+
+        sub += voice.sub.getNextSample() * 0.6f * gain;
+        midA += voice.midA.getNextSample() * 0.2f * gain;
+        midB += voice.midB.getNextSample() * 0.2f * gain;
     }
 
     float getSubDriftFrequencyRatio() const noexcept

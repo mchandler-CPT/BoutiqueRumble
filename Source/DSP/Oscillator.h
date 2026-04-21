@@ -18,9 +18,11 @@ public:
         updatePhaseIncrement();
     }
 
-    void resetPhase() noexcept
+    void resetPhase(float normalizedPhase = 0.0f) noexcept
     {
-        phase = 0.0;
+        phase = std::fmod(static_cast<double>(normalizedPhase), 1.0);
+        if (phase < 0.0)
+            phase += 1.0;
     }
 
     void setActive(bool shouldBeActive) noexcept
@@ -118,11 +120,9 @@ private:
 
     void advancePhase()
     {
-        phase += phaseIncrement;
-        if (phase >= 1.0)
-        {
-            phase -= std::floor(phase);
-        }
+        phase = std::fmod(phase + phaseIncrement, 1.0);
+        if (phase < 0.0)
+            phase += 1.0;
     }
 
     double sampleRateHz { 44100.0 };

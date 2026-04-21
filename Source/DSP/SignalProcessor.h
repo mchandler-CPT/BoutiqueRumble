@@ -188,6 +188,12 @@ public:
         mEntropy = mShapedGrit;
     }
 
+    void resetFaultEngine() noexcept
+    {
+        mShapedGrit = 0.0f;
+        mEntropy = 0.0f;
+    }
+
     float applyGritManifold(float oscillatorSample)
     {
         float processed = oscillatorSample;

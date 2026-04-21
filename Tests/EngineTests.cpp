@@ -231,8 +231,8 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
         }
     }
 
-    REQUIRE(silenceStartSample >= 12000);
-    REQUIRE(silenceStartSample <= 30000);
+    REQUIRE(silenceStartSample >= 20);
+    REQUIRE(silenceStartSample <= 400);
 }
 
 TEST_CASE("Harmony 0 maps to 1:2:4 frequency ratios", "[engine][harmony][ratios]")
@@ -411,7 +411,7 @@ TEST_CASE("Monophonic note stack keeps newest note after older release", "[engin
     REQUIRE(peak > 1.0e-4f);
 }
 
-TEST_CASE("Legato transition glides frequency over multiple samples", "[engine][midi][glide]")
+TEST_CASE("Legato transition snaps to target frequency immediately", "[engine][midi][glide]")
 {
     constexpr int noteA = 36;
     constexpr int noteB = 48;
@@ -423,27 +423,14 @@ TEST_CASE("Legato transition glides frequency over multiple samples", "[engine][
     engine.noteOn(noteA, 1.0f);
     juce::ignoreUnused(engine.renderFrequencyTraceForTests(32)); // settle first note.
 
-    engine.noteOn(noteB, 1.0f); // legato: should glide, not snap.
+    engine.noteOn(noteB, 1.0f); // legato: should snap for clinical attack.
     const auto trace = engine.renderFrequencyTraceForTests(traceSamples);
 
     REQUIRE(! trace.empty());
-    REQUIRE(std::abs(trace.front() - targetFrequency) > 0.5f);
-
-    int samplesToTarget = -1;
-    for (int i = 0; i < static_cast<int>(trace.size()); ++i)
-    {
-        if (std::abs(trace[static_cast<size_t>(i)] - targetFrequency) < 0.1f)
-        {
-            samplesToTarget = i;
-            break;
-        }
-    }
-
-    REQUIRE(samplesToTarget > 1);
-    REQUIRE(samplesToTarget < traceSamples);
+    REQUIRE(trace.front() == Catch::Approx(targetFrequency).margin(0.1f));
 }
 
-TEST_CASE("Legato noteOn preserves oscillator phase continuity", "[engine][midi][phase]")
+TEST_CASE("Legato noteOn resets active slot phase for shadow handoff", "[engine][midi][phase]")
 {
     constexpr int noteA = 40;
     constexpr int noteB = 52;
@@ -456,11 +443,10 @@ TEST_CASE("Legato noteOn preserves oscillator phase continuity", "[engine][midi]
     warmup.clear();
     engine.process(warmup);
 
-    const auto phaseBefore = engine.getOscillatorPhasesForTests();
     engine.noteOn(noteB, 1.0f); // legato transition
     const auto phaseAfter = engine.getOscillatorPhasesForTests();
 
-    REQUIRE(phaseAfter[0] == Catch::Approx(phaseBefore[0]).margin(1.0e-9));
-    REQUIRE(phaseAfter[1] == Catch::Approx(phaseBefore[1]).margin(1.0e-9));
-    REQUIRE(phaseAfter[2] == Catch::Approx(phaseBefore[2]).margin(1.0e-9));
+    REQUIRE(phaseAfter[0] == Catch::Approx(0.0).margin(1.0e-9));
+    REQUIRE(phaseAfter[1] == Catch::Approx(0.0).margin(1.0e-9));
+    REQUIRE(phaseAfter[2] == Catch::Approx(0.0).margin(1.0e-9));
 }

@@ -77,7 +77,9 @@ public:
         mPulse = juce::jlimit(0.0f, 1.0f, newPulse);
         mGateDutyCycle = juce::jmap(mPulse, 0.0f, 1.0f, 0.15f, 0.95f);
 
-        const float slewMs = juce::jmax(minGateSlewMs, juce::jmap(mPulse, 0.0f, 1.0f, 0.2f, 35.0f));
+        const float slewMs = (mPulse <= 1.0e-5f)
+            ? minGateSlewMs
+            : juce::jmap(mPulse, 0.0f, 1.0f, minGateSlewMs, 35.0f);
         gateSlew.setRiseAndFallTimesMs(slewMs, slewMs);
     }
 
@@ -188,11 +190,28 @@ public:
             const float midMono = (midA + midB) * mMasterGain * mVoice.mVelocity * pulseGate;
 
             const float shredT = juce::jlimit(0.0f, 1.0f, breakAmount);
-            const float torqueGrit = breakAmount * 0.55f + shredT * shredT * 0.15f;
-            const float savedShapedGrit = mSignal.mShapedGrit;
-            mSignal.mShapedGrit = juce::jmin(1.0f, savedShapedGrit + torqueGrit);
-            float leftOut = mSignal.applyGritManifold(midMono);
-            mSignal.mShapedGrit = savedShapedGrit;
+            const float torqueFault = breakAmount * 0.55f + shredT * shredT * 0.15f;
+            const float baseFaultAmount = juce::jlimit(0.0f, 1.0f, mSignal.mShapedGrit); // Smoothed via LinearSmoothedValue.
+            const float faultAmount = juce::jmin(1.0f, baseFaultAmount + torqueFault);
+
+            float leftOut = midMono;
+            if (faultAmount <= 1.0e-5f) [[likely]]
+            {
+                // BOUTIQUE RULE: Zero means Zero. Bit-perfect bypass active.
+                if (mFaultWasActive)
+                {
+                    mSignal.resetFaultEngine();
+                    mFaultWasActive = false;
+                }
+            }
+            else
+            {
+                const float savedShapedGrit = mSignal.mShapedGrit;
+                mSignal.mShapedGrit = faultAmount;
+                leftOut = mSignal.applyGritManifold(midMono);
+                mSignal.mShapedGrit = savedShapedGrit;
+                mFaultWasActive = true;
+            }
             float rightOut = leftOut;
             mSignal.processMidHighSpatial(leftOut, rightOut, mGirth);
             leftOut = juce::jlimit(-1.0f, 1.0f, leftOut + subMono);
@@ -577,7 +596,7 @@ private:
     static constexpr double macroSmoothingSeconds = 0.01;
     static constexpr double brakeSmootherSeconds = 0.05;
     static constexpr double phaseLockThreshold = 0.01;
-    static constexpr float minGateSlewMs = 1.0f;
+    static constexpr float minGateSlewMs = 0.1f;
     static constexpr float gateRetriggerDipSeconds = 0.001f;
     int mGateRetriggerDipSamplesRemaining { 0 };
 
@@ -588,6 +607,7 @@ private:
 
     int64_t mBrakeFreeRunningPulseIndex { -1 };
     bool mBrakeHiccupThisPulse { false };
+    bool mFaultWasActive { false };
 
 #if JUCE_DEBUG
     uint64_t mGlobalAudioSampleCounterForDbg { 0 };
