@@ -4,7 +4,8 @@
 #include "PluginProcessor.h"
 #include "UI/BoutiqueLookAndFeel.h"
 
-class BoutiqueRumbleAudioProcessorEditor final : public juce::AudioProcessorEditor
+class BoutiqueRumbleAudioProcessorEditor final : public juce::AudioProcessorEditor,
+                                                 private juce::Timer
 {
 public:
     explicit BoutiqueRumbleAudioProcessorEditor (BoutiqueRumbleAudioProcessor&);
@@ -14,6 +15,8 @@ public:
     void resized() override;
 
 private:
+    void timerCallback() override;
+
     BoutiqueRumbleAudioProcessor& audioProcessor;
     BoutiqueLookAndFeel boutiqueLookAndFeel;
     juce::MidiKeyboardComponent keyboardComponent;
@@ -37,7 +40,13 @@ private:
     juce::Label brakeLabel;
     juce::Label bpmLabel;
 
+    juce::GroupComponent timingGroup;
+    juce::GroupComponent disorderGroup;
+    juce::GroupComponent toneGroup;
+
     juce::Slider bpmBox;
+    juce::ToggleButton syncLightButton;
+    float mSyncPulsePhase { 0.0f };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pulseAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> shapeAttachment;

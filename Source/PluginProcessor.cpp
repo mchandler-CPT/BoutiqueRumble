@@ -30,12 +30,27 @@ BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
 
 void BoutiqueRumbleAudioProcessor::setStandaloneClockBpm(double bpm) noexcept
 {
-    mDefaultBpm.store(juce::jlimit(40.0, 220.0, bpm));
+    mDefaultBpm.store(juce::jlimit(40.0, 250.0, bpm));
 }
 
 double BoutiqueRumbleAudioProcessor::getStandaloneClockBpm() const noexcept
 {
     return mDefaultBpm.load();
+}
+
+void BoutiqueRumbleAudioProcessor::setUseHostSync(bool shouldUseHostSync) noexcept
+{
+    mUseHostSync.store(shouldUseHostSync);
+}
+
+bool BoutiqueRumbleAudioProcessor::getUseHostSync() const noexcept
+{
+    return mUseHostSync.load();
+}
+
+double BoutiqueRumbleAudioProcessor::getCurrentClockBpmForUi() const noexcept
+{
+    return mCurrentClockBpmForUi.load();
 }
 
 const juce::String BoutiqueRumbleAudioProcessor::getName() const
@@ -150,8 +165,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
         "Rate",
         juce::StringArray { "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/64" },
         6));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::skip_prob, "SKIP", 0.0f, 1.0f, 0.2f));
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::brake, "BRAKE", 0.0f, 1.0f, 1.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::skip_prob, "Fault", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::brake, "Break", 0.0f, 1.0f, 0.0f));
 
     return { params.begin(), params.end() };
 }
@@ -172,23 +187,21 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float girth = (girthParam != nullptr) ? girthParam->load() : 0.0f;
     const float pulse = (pulseParam != nullptr) ? pulseParam->load() : 0.5f;
     const int rateIndex = (rateParam != nullptr) ? juce::roundToInt(rateParam->load()) : 6;
-    const float skipProbability = (skipParam != nullptr) ? skipParam->load() : 0.2f;
+    const float skipProbability = (skipParam != nullptr) ? skipParam->load() : 0.0f;
 
     double bpm = mDefaultBpm.load();
     double ppqPosition = mInternalPpq;
     bool isPlaying = true;
     bool hasPpqPosition = true;
     bool usingHostClock = false;
-
-    if (auto* playHead = getPlayHead())
+    if (mUseHostSync.load())
     {
-        if (const auto position = playHead->getPosition())
+        if (auto* playHead = getPlayHead())
         {
-            const bool hostIsPlaying = position->getIsPlaying();
-            if (hostIsPlaying)
+            if (const auto position = playHead->getPosition())
             {
                 usingHostClock = true;
-                isPlaying = true;
+                isPlaying = position->getIsPlaying();
 
                 if (const auto hostBpm = position->getBpm())
                 {
@@ -211,14 +224,7 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     if (! usingHostClock)
     {
         const double sampleRate = juce::jmax(1.0, getSampleRate());
-        const double pulseAsDouble = static_cast<double>(pulse);
-        const double defaultBpm = mDefaultBpm.load();
-
-       #if JucePlugin_Build_Standalone
-        const double internalBpm = defaultBpm * juce::jmap(pulseAsDouble, 0.0, 1.0, 0.9, 1.1);
-       #else
-        const double internalBpm = defaultBpm;
-       #endif
+        const double internalBpm = mDefaultBpm.load();
 
         const double quarterNotesPerSecond = internalBpm / 60.0;
         const double blockIncrement = (static_cast<double>(buffer.getNumSamples()) / sampleRate) * quarterNotesPerSecond;
@@ -238,6 +244,8 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     {
         mInternalPpq = ppqPosition;
     }
+
+    mCurrentClockBpmForUi.store(juce::jlimit(40.0, 250.0, bpm));
 
     for (const auto metadata : midiMessages)
     {
@@ -293,12 +301,22 @@ juce::AudioProcessorEditor* BoutiqueRumbleAudioProcessor::createEditor()
 
 void BoutiqueRumbleAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ignoreUnused (destData);
+    const auto state = apvts.copyState();
+    if (auto xml = state.createXml())
+    {
+        copyXmlToBinary(*xml, destData);
+    }
 }
 
 void BoutiqueRumbleAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    juce::ignoreUnused (data, sizeInBytes);
+    if (auto xmlState = getXmlFromBinary(data, sizeInBytes))
+    {
+        if (xmlState->hasTagName(apvts.state.getType()))
+        {
+            apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+        }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

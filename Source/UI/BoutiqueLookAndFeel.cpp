@@ -2,14 +2,14 @@
 
 BoutiqueLookAndFeel::BoutiqueLookAndFeel()
 {
-    setColour(juce::ResizableWindow::backgroundColourId, juce::Colour(0xff101014));
-    setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xffc87f2f));
-    setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff2a2f3b));
-    setColour(juce::Slider::thumbColourId, juce::Colour(0xfff5d37a));
-    setColour(juce::Label::textColourId, juce::Colour(0xffd5d9e2));
-    setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xffd3d7df));
-    setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xff161a22));
-    setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, juce::Colour(0xffc87f2f));
+    setColour(juce::ResizableWindow::backgroundColourId, juce::Colour(0xff161412));
+    setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xffb65f1e));   // Rust orange
+    setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff2b2a28)); // Deep charcoal
+    setColour(juce::Slider::thumbColourId, juce::Colour(0xffcbc13a));                // Sulfur yellow
+    setColour(juce::Label::textColourId, juce::Colour(0xffd8d2c8));
+    setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xffb9b1a4));
+    setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xff141312));
+    setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, juce::Colour(0xff9a521c));
 }
 
 void BoutiqueLookAndFeel::drawRotarySlider(juce::Graphics& g,

@@ -13,6 +13,9 @@ public:
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
     void setStandaloneClockBpm(double bpm) noexcept;
     double getStandaloneClockBpm() const noexcept;
+    void setUseHostSync(bool shouldUseHostSync) noexcept;
+    bool getUseHostSync() const noexcept;
+    double getCurrentClockBpmForUi() const noexcept;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -58,5 +61,11 @@ private:
     std::vector<int> mActiveNotes;
     double mInternalPpq { 0.0 };
     std::atomic<double> mDefaultBpm { 120.0 };
+    std::atomic<double> mCurrentClockBpmForUi { 120.0 };
+   #if JucePlugin_Build_Standalone
+    std::atomic<bool> mUseHostSync { false };
+   #else
+    std::atomic<bool> mUseHostSync { true };
+   #endif
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 };

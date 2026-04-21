@@ -57,20 +57,53 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureLabel(girthLabel, "GIRTH");
     configureLabel(harmonyLabel, "HARMONY");
     configureLabel(rateLabel, "RATE");
-    configureLabel(skipLabel, "SKIP");
-    configureLabel(brakeLabel, "BRAKE");
+    configureLabel(skipLabel, "FAULT");
+    configureLabel(brakeLabel, "BREAK");
 
     configureLabel(bpmLabel, "BPM");
     bpmBox.setSliderStyle(juce::Slider::IncDecButtons);
-    bpmBox.setIncDecButtonsMode(juce::Slider::incDecButtonsDraggable_AutoDirection);
-    bpmBox.setRange(40.0, 220.0, 1.0);
-    bpmBox.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 56, 18);
+    bpmBox.setIncDecButtonsMode(juce::Slider::incDecButtonsDraggable_Vertical);
+    bpmBox.setRange(40.0, 250.0, 1.0);
+    bpmBox.setNumDecimalPlacesToDisplay(0);
+    bpmBox.setTextBoxStyle(juce::Slider::TextBoxRight, false, 68, 20);
+    bpmBox.setColour(juce::Slider::backgroundColourId, juce::Colour(0xff22201d));
+    bpmBox.setColour(juce::Slider::thumbColourId, juce::Colour(0xffc7bb3f));
+    bpmBox.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xff1c1a18));
     bpmBox.setValue(audioProcessor.getStandaloneClockBpm(), juce::dontSendNotification);
     bpmBox.onValueChange = [this]
     {
         audioProcessor.setStandaloneClockBpm(bpmBox.getValue());
     };
     addAndMakeVisible(bpmBox);
+
+    syncLightButton.setButtonText("SYNC");
+    syncLightButton.setClickingTogglesState(true);
+    syncLightButton.setColour(juce::ToggleButton::tickColourId, juce::Colour(0xffc7bb3f));
+    syncLightButton.setColour(juce::ToggleButton::tickDisabledColourId, juce::Colour(0xff4e473d));
+    syncLightButton.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffd5d9e2));
+    syncLightButton.setToggleState(audioProcessor.getUseHostSync(), juce::dontSendNotification);
+    syncLightButton.onClick = [this]
+    {
+        const bool syncOn = syncLightButton.getToggleState();
+        audioProcessor.setUseHostSync(syncOn);
+        bpmBox.setEnabled(! syncOn);
+        bpmBox.setAlpha(syncOn ? 0.55f : 1.0f);
+    };
+    addAndMakeVisible(syncLightButton);
+    bpmBox.setEnabled(! syncLightButton.getToggleState());
+    bpmBox.setAlpha(syncLightButton.getToggleState() ? 0.55f : 1.0f);
+
+    auto configureGroup = [this] (juce::GroupComponent& group, const juce::String& title)
+    {
+        group.setText(title);
+        group.setColour(juce::GroupComponent::outlineColourId, juce::Colour(0xff3a322b));
+        group.setColour(juce::GroupComponent::textColourId, juce::Colour(0xffd7c3a7));
+        addAndMakeVisible(group);
+    };
+
+    configureGroup(timingGroup, "TIMING");
+    configureGroup(disorderGroup, "DISORDER");
+    configureGroup(toneGroup, "TONE");
 
     auto& apvts = audioProcessor.getAPVTS();
     pulseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::pulse, pulseSlider);
@@ -83,23 +116,21 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     brakeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::brake, brakeSlider);
 
     addAndMakeVisible(keyboardComponent);
-    keyboardComponent.setAvailableRange(36, 96);
+    keyboardComponent.setAvailableRange(0, 96); // C-2..C6 extended performance range
+    keyboardComponent.setLowestVisibleKey(0);
 
-#if JucePlugin_Build_Standalone
     bpmLabel.setVisible(true);
     bpmBox.setVisible(true);
-    bpmBox.setEnabled(true);
-#else
-    bpmLabel.setVisible(false);
-    bpmBox.setVisible(false);
-    bpmBox.setEnabled(false);
-#endif
+    bpmBox.setEnabled(! syncLightButton.getToggleState());
+    syncLightButton.setVisible(true);
+    startTimerHz(30);
 
     setSize (940, 420);
 }
 
 BoutiqueRumbleAudioProcessorEditor::~BoutiqueRumbleAudioProcessorEditor()
 {
+    stopTimer();
     setLookAndFeel(nullptr);
 }
 
@@ -111,10 +142,6 @@ void BoutiqueRumbleAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour(juce::Colour(0xffd5d9e2));
     g.setFont(juce::FontOptions(20.0f, juce::Font::bold));
     g.drawFittedText("Boutique Rumble", headerArea.removeFromLeft(280), juce::Justification::centredLeft, 1);
-
-    g.setColour(juce::Colour(0xff7f8797));
-    g.setFont(juce::FontOptions(13.0f));
-    g.drawFittedText("Code-driven -> GUI-driven control", headerArea, juce::Justification::centredRight, 1);
 }
 
 void BoutiqueRumbleAudioProcessorEditor::resized()
@@ -123,36 +150,102 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     bounds.removeFromTop(52);
 
     auto keyboardArea = bounds.removeFromBottom(88);
+    const int keyboardStart = 0;
+    const int keyboardEnd = 96;
+    int whiteKeyCount = 0;
+    for (int midi = keyboardStart; midi <= keyboardEnd; ++midi)
+    {
+        if (! juce::MidiMessage::isMidiNoteBlack(midi))
+            ++whiteKeyCount;
+    }
+    if (whiteKeyCount > 0)
+    {
+        const float targetKeyWidth = static_cast<float>(keyboardArea.getWidth()) / static_cast<float>(whiteKeyCount);
+        keyboardComponent.setKeyWidth(targetKeyWidth);
+    }
     keyboardComponent.setBounds(keyboardArea);
-    auto bottomControlArea = bounds.removeFromBottom(24);
 
-    auto knobArea = bounds.reduced(6);
-    constexpr int knobCount = 8;
-    const int maxKnobRowWidth = 8 * 112;
-    if (knobArea.getWidth() > maxKnobRowWidth)
+    auto groupedArea = bounds.reduced(6);
+    const int gap = 10;
+    const int totalGap = gap * 2;
+    const int availableWidth = juce::jmax(0, groupedArea.getWidth() - totalGap);
+    const int timingWidth = availableWidth * 3 / 9;
+    const int disorderWidth = availableWidth * 2 / 9;
+    const int toneWidth = availableWidth - timingWidth - disorderWidth;
+
+    auto timingArea = groupedArea.removeFromLeft(timingWidth);
+    groupedArea.removeFromLeft(gap);
+    auto toneArea = groupedArea.removeFromLeft(toneWidth);
+    groupedArea.removeFromLeft(gap);
+    auto disorderArea = groupedArea;
+
+    timingGroup.setBounds(timingArea);
+    disorderGroup.setBounds(disorderArea);
+    toneGroup.setBounds(toneArea);
+
+    auto layoutKnobGroup = [] (juce::Rectangle<int> area,
+                               juce::Slider* const* sliders,
+                               juce::Label* const* labels,
+                               int count)
     {
-        knobArea = knobArea.withSizeKeepingCentre(maxKnobRowWidth, knobArea.getHeight());
-    }
+        auto inner = area.reduced(10, 24);
+        const int cellWidth = count > 0 ? inner.getWidth() / count : inner.getWidth();
+        const int knobSize = juce::jlimit(66, 112, juce::jmin(cellWidth - 10, inner.getHeight() - 24));
 
-    const int knobWidth = knobArea.getWidth() / knobCount;
-    const int knobSize = juce::jmin(knobWidth - 10, knobArea.getHeight());
+        for (int i = 0; i < count; ++i)
+        {
+            auto cell = inner.removeFromLeft(cellWidth);
+            auto labelArea = cell.removeFromTop(20);
+            labels[i]->setBounds(labelArea);
+            sliders[i]->setBounds(cell.withSizeKeepingCentre(knobSize, knobSize));
+        }
+    };
 
-    juce::Slider* sliders[knobCount] = { &pulseSlider, &shapeSlider, &gritSlider, &girthSlider, &harmonySlider, &rateSlider, &skipSlider, &brakeSlider };
-    juce::Label* labels[knobCount] = { &pulseLabel, &shapeLabel, &gritLabel, &girthLabel, &harmonyLabel, &rateLabel, &skipLabel, &brakeLabel };
-    for (int i = 0; i < knobCount; ++i)
-    {
-        auto cell = knobArea.removeFromLeft(knobWidth);
-        auto labelArea = cell.removeFromTop(20);
-        labels[i]->setBounds(labelArea);
+    auto timingInner = timingArea.reduced(10, 24);
+    const int timingCellWidth = timingInner.getWidth() / 3;
+    const int timingKnobSize = juce::jlimit(66, 112, juce::jmin(timingCellWidth - 10, timingInner.getHeight() - 24));
 
-        sliders[i]->setBounds(cell.withSizeKeepingCentre(knobSize, knobSize));
-    }
+    auto pulseCell = timingInner.removeFromLeft(timingCellWidth);
+    pulseLabel.setBounds(pulseCell.removeFromTop(20));
+    pulseSlider.setBounds(pulseCell.withSizeKeepingCentre(timingKnobSize, timingKnobSize));
 
-#if JucePlugin_Build_Standalone
-    auto bpmArea = bottomControlArea.removeFromRight(140);
-    bpmLabel.setBounds(bpmArea.removeFromLeft(40));
-    bpmBox.setBounds(bpmArea.reduced(2, 2));
-#else
-    juce::ignoreUnused(bottomControlArea);
-#endif
+    auto rateCell = timingInner.removeFromLeft(timingCellWidth);
+    rateLabel.setBounds(rateCell.removeFromTop(20));
+    rateSlider.setBounds(rateCell.withSizeKeepingCentre(timingKnobSize, timingKnobSize));
+
+    auto bpmCell = timingInner;
+    auto bpmTopRow = bpmCell.removeFromTop(20);
+    auto syncArea = bpmTopRow.removeFromRight(58);
+    bpmLabel.setBounds(bpmTopRow);
+    syncLightButton.setBounds(syncArea.reduced(2, 0));
+    bpmBox.setBounds(bpmCell.reduced(8, juce::jmax(8, bpmCell.getHeight() / 3)));
+
+    juce::Slider* toneSliders[] = { &shapeSlider, &gritSlider, &harmonySlider, &girthSlider };
+    juce::Label* toneLabels[] = { &shapeLabel, &gritLabel, &harmonyLabel, &girthLabel };
+    layoutKnobGroup(toneArea, toneSliders, toneLabels, 4);
+
+    juce::Slider* disorderSliders[] = { &skipSlider, &brakeSlider };
+    juce::Label* disorderLabels[] = { &skipLabel, &brakeLabel };
+    layoutKnobGroup(disorderArea, disorderSliders, disorderLabels, 2);
+
+    bpmLabel.setVisible(true);
+    bpmBox.setVisible(true);
+    syncLightButton.setVisible(true);
+}
+
+void BoutiqueRumbleAudioProcessorEditor::timerCallback()
+{
+    const float bpm = static_cast<float>(juce::jlimit(40.0, 250.0, audioProcessor.getCurrentClockBpmForUi()));
+    const float beatsPerSecond = bpm / 60.0f;
+    const float dt = 1.0f / 30.0f;
+    mSyncPulsePhase = std::fmod(mSyncPulsePhase + beatsPerSecond * dt, 1.0f);
+
+    const float pulseShape = std::exp(-12.0f * mSyncPulsePhase);
+    const float glow = 0.28f + 0.72f * pulseShape;
+    const auto lit = juce::Colour(0xfff2d33c).withMultipliedBrightness(glow);
+    const auto dim = juce::Colour(0xff4e473d);
+
+    syncLightButton.setColour(juce::ToggleButton::tickColourId, lit);
+    syncLightButton.setColour(juce::ToggleButton::tickDisabledColourId, dim);
+    repaint(syncLightButton.getBounds());
 }
