@@ -23,6 +23,8 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     rateParam = apvts.getRawParameterValue(IDs::rate);
     skipParam = apvts.getRawParameterValue(IDs::skip_prob);
     brakeParam = apvts.getRawParameterValue(IDs::brake);
+    cutoffParam = apvts.getRawParameterValue(IDs::cutoff);
+    resoParam = apvts.getRawParameterValue(IDs::reso);
     rumbleEngine.setBrakeParameter(brakeParam);
 }
 
@@ -51,6 +53,11 @@ bool BoutiqueRumbleAudioProcessor::getUseHostSync() const noexcept
 double BoutiqueRumbleAudioProcessor::getCurrentClockBpmForUi() const noexcept
 {
     return mCurrentClockBpmForUi.load();
+}
+
+void BoutiqueRumbleAudioProcessor::setScopeVisualiser(juce::AudioVisualiserComponent* visualiser) noexcept
+{
+    mScopeVisualiser = visualiser;
 }
 
 const juce::String BoutiqueRumbleAudioProcessor::getName() const
@@ -167,6 +174,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout BoutiqueRumbleAudioProcessor
         6));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::skip_prob, "Fault", 0.0f, 1.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::brake, "Break", 0.0f, 1.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        IDs::cutoff,
+        "Cutoff",
+        juce::NormalisableRange<float>(20.0f, 20000.0f, 0.01f, 0.2f),
+        20000.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(IDs::reso, "Reso", 0.1f, 20.0f, 0.707f));
 
     return { params.begin(), params.end() };
 }
@@ -188,6 +201,8 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float pulse = (pulseParam != nullptr) ? pulseParam->load() : 0.5f;
     const int rateIndex = (rateParam != nullptr) ? juce::roundToInt(rateParam->load()) : 6;
     const float skipProbability = (skipParam != nullptr) ? skipParam->load() : 0.0f;
+    const float cutoffHz = (cutoffParam != nullptr) ? cutoffParam->load() : 20000.0f;
+    const float resonance = (resoParam != nullptr) ? resoParam->load() : 0.707f;
 
     double bpm = mDefaultBpm.load();
     double ppqPosition = mInternalPpq;
@@ -285,8 +300,12 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     rumbleEngine.setPulse(pulse);
     rumbleEngine.setRate(rateIndex);
     rumbleEngine.setSkipProbability(skipProbability);
+    rumbleEngine.setCutoff(cutoffHz);
+    rumbleEngine.setResonance(resonance);
     rumbleEngine.setTransportInfo(bpm, ppqPosition, isPlaying, hasPpqPosition);
     rumbleEngine.process(buffer);
+    if (mScopeVisualiser != nullptr)
+        mScopeVisualiser->pushBuffer(buffer);
 }
 
 bool BoutiqueRumbleAudioProcessor::hasEditor() const

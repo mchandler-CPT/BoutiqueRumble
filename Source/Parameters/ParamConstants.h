@@ -10,4 +10,6 @@ namespace IDs {
     inline const juce::String rate    { "RATE" };
     inline const juce::String skip_prob { "skip_prob" };
     inline const juce::String brake { "BRAKE" };
+    inline const juce::String cutoff { "CUTOFF" };
+    inline const juce::String reso { "RESO" };
 }

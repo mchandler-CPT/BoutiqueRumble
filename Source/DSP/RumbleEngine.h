@@ -32,6 +32,18 @@ public:
         gateSlew.prepare(sampleRateHz);
         mSignal.prepareCrossover(sampleRateHz, mGirth);
         mSignal.prepareSafety(sampleRateHz);
+        juce::dsp::ProcessSpec spec {};
+        spec.sampleRate = sampleRateHz;
+        spec.maximumBlockSize = 2048;
+        spec.numChannels = 1;
+        for (auto& filt : mSculptFilter)
+        {
+            filt.reset();
+            filt.prepare(spec);
+            filt.setType(juce::dsp::StateVariableTPTFilterType::lowpass);
+            filt.setCutoffFrequency(mCutoffHz);
+            filt.setResonance(mResonanceQ);
+        }
         mMotif.prepareState();
         mGateRetriggerDipSamplesRemaining = 0;
         mBrake.prepare(sampleRateHz, brakeSmootherSeconds);
@@ -111,6 +123,20 @@ public:
     void setMasterGain(float newMasterGain)
     {
         mMasterGain = juce::jmax(0.0f, newMasterGain);
+    }
+
+    void setCutoff(float newCutoffHz) noexcept
+    {
+        mCutoffHz = juce::jlimit(20.0f, 20000.0f, newCutoffHz);
+        for (auto& filt : mSculptFilter)
+            filt.setCutoffFrequency(mCutoffHz);
+    }
+
+    void setResonance(float newQ) noexcept
+    {
+        mResonanceQ = juce::jlimit(0.1f, 20.0f, newQ);
+        for (auto& filt : mSculptFilter)
+            filt.setResonance(mResonanceQ);
     }
 
     void setTransportInfo(double bpm, double ppqPosition, bool isPlaying, bool hasPpqPosition)
@@ -218,6 +244,8 @@ public:
             rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
             leftOut *= mVoice.mNoteGainEnvelope;
             rightOut *= mVoice.mNoteGainEnvelope;
+            leftOut = mSculptFilter[0].processSample(0, leftOut);
+            rightOut = mSculptFilter[1].processSample(0, rightOut);
 
             if (mVoice.mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
             {
@@ -608,6 +636,9 @@ private:
     int64_t mBrakeFreeRunningPulseIndex { -1 };
     bool mBrakeHiccupThisPulse { false };
     bool mFaultWasActive { false };
+    std::array<juce::dsp::StateVariableTPTFilter<float>, 2> mSculptFilter;
+    float mCutoffHz { 20000.0f };
+    float mResonanceQ { 0.707f };
 
 #if JUCE_DEBUG
     uint64_t mGlobalAudioSampleCounterForDbg { 0 };

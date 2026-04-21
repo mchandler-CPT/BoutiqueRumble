@@ -28,6 +28,8 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureSlider(rateSlider, "Rate");
     configureSlider(skipSlider, "Skip");
     configureSlider(brakeSlider, "Brake");
+    configureSlider(cutoffSlider, "Cutoff");
+    configureSlider(resoSlider, "Reso");
     rateSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     rateSlider.setRange(0.0, 9.0, 1.0);
     rateSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 18);
@@ -43,6 +45,24 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
         const int idx = labels.indexOf(text.trim());
         return static_cast<double>(idx >= 0 ? idx : 6);
     };
+    cutoffSlider.setRange(20.0, 20000.0);
+    cutoffSlider.setSkewFactor(0.2);
+    cutoffSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 86, 18);
+    cutoffSlider.textFromValueFunction = [] (double value)
+    {
+        if (value >= 1000.0)
+            return juce::String(value / 1000.0, 1) + " kHz";
+        return juce::String(juce::roundToInt(value)) + " Hz";
+    };
+    cutoffSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        auto trimmed = text.trim().toLowerCase();
+        if (trimmed.contains("khz"))
+            return trimmed.upToFirstOccurrenceOf("k", false, false).getDoubleValue() * 1000.0;
+        return trimmed.upToFirstOccurrenceOf("h", false, false).getDoubleValue();
+    };
+    resoSlider.setRange(0.1, 20.0, 0.01);
+    resoSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
 
     auto configureLabel = [this] (juce::Label& label, const juce::String& text)
     {
@@ -60,6 +80,8 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureLabel(rateLabel, "RATE");
     configureLabel(skipLabel, "FAULT");
     configureLabel(brakeLabel, "BREAK");
+    configureLabel(cutoffLabel, "CUTOFF");
+    configureLabel(resoLabel, "RESO");
 
     configureLabel(bpmLabel, "BPM");
     bpmBox.setSliderStyle(juce::Slider::IncDecButtons);
@@ -105,6 +127,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     configureGroup(timingGroup, "TIMING");
     configureGroup(disorderGroup, "DISORDER");
     configureGroup(toneGroup, "TONE");
+    configureGroup(sculptGroup, "SCULPT");
 
     auto& apvts = audioProcessor.getAPVTS();
     pulseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::pulse, pulseSlider);
@@ -115,6 +138,8 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     rateAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::rate, rateSlider);
     skipAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::skip_prob, skipSlider);
     brakeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::brake, brakeSlider);
+    cutoffAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::cutoff, cutoffSlider);
+    resoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, IDs::reso, resoSlider);
 
     addAndMakeVisible(keyboardComponent);
     keyboardComponent.setAvailableRange(0, 96); // C-2..C6 extended performance range
@@ -123,8 +148,9 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     waveformVisualiser.setBufferSize(512);
     waveformVisualiser.setSamplesPerBlock(16);
     waveformVisualiser.setRepaintRate(30);
-    waveformVisualiser.setColours(juce::Colour(0xff1a1918), juce::Colour(0xffc7bb3f));
+    waveformVisualiser.setColours(juce::Colour(0x22101010), juce::Colour(0xffc87f2f));
     addAndMakeVisible(waveformVisualiser);
+    audioProcessor.setScopeVisualiser(&waveformVisualiser);
 
     bpmLabel.setVisible(true);
     bpmBox.setVisible(true);
@@ -137,6 +163,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
 
 BoutiqueRumbleAudioProcessorEditor::~BoutiqueRumbleAudioProcessorEditor()
 {
+    audioProcessor.setScopeVisualiser(nullptr);
     stopTimer();
     setLookAndFeel(nullptr);
 }
@@ -177,21 +204,25 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
 
     auto groupedArea = bounds.reduced(6);
     const int gap = 10;
-    const int totalGap = gap * 2;
+    const int totalGap = gap * 3;
     const int availableWidth = juce::jmax(0, groupedArea.getWidth() - totalGap);
-    const int timingWidth = availableWidth * 3 / 9;
-    const int disorderWidth = availableWidth * 2 / 9;
-    const int toneWidth = availableWidth - timingWidth - disorderWidth;
+    const int timingWidth = availableWidth * 3 / 12;
+    const int toneWidth = availableWidth * 4 / 12;
+    const int disorderWidth = availableWidth * 2 / 12;
+    const int sculptWidth = availableWidth - timingWidth - toneWidth - disorderWidth;
 
     auto timingArea = groupedArea.removeFromLeft(timingWidth);
     groupedArea.removeFromLeft(gap);
     auto toneArea = groupedArea.removeFromLeft(toneWidth);
     groupedArea.removeFromLeft(gap);
-    auto disorderArea = groupedArea;
+    auto disorderArea = groupedArea.removeFromLeft(disorderWidth);
+    groupedArea.removeFromLeft(gap);
+    auto sculptArea = groupedArea;
 
     timingGroup.setBounds(timingArea);
     disorderGroup.setBounds(disorderArea);
     toneGroup.setBounds(toneArea);
+    sculptGroup.setBounds(sculptArea);
 
     auto layoutKnobGroup = [] (juce::Rectangle<int> area,
                                juce::Slider* const* sliders,
@@ -237,6 +268,16 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     juce::Slider* disorderSliders[] = { &skipSlider, &brakeSlider };
     juce::Label* disorderLabels[] = { &skipLabel, &brakeLabel };
     layoutKnobGroup(disorderArea, disorderSliders, disorderLabels, 2);
+
+    auto sculptInner = sculptArea.reduced(10, 24);
+    auto cutoffCell = sculptInner.removeFromLeft(juce::jmax(130, sculptInner.getWidth() * 3 / 4));
+    cutoffLabel.setBounds(cutoffCell.removeFromTop(20));
+    cutoffSlider.setBounds(cutoffCell.withSizeKeepingCentre(120, 120));
+
+    auto resoCell = sculptInner;
+    resoLabel.setBounds(resoCell.removeFromTop(20));
+    const int resoSize = juce::jmin(90, juce::jmax(70, juce::jmin(resoCell.getWidth() - 8, resoCell.getHeight() - 10)));
+    resoSlider.setBounds(resoCell.withSizeKeepingCentre(resoSize, resoSize));
 
     bpmLabel.setVisible(true);
     bpmBox.setVisible(true);

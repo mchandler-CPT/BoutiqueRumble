@@ -30,6 +30,8 @@ private:
     juce::Slider rateSlider;
     juce::Slider skipSlider;
     juce::Slider brakeSlider;
+    juce::Slider cutoffSlider;
+    juce::Slider resoSlider;
 
     juce::Label pulseLabel;
     juce::Label shapeLabel;
@@ -39,11 +41,14 @@ private:
     juce::Label rateLabel;
     juce::Label skipLabel;
     juce::Label brakeLabel;
+    juce::Label cutoffLabel;
+    juce::Label resoLabel;
     juce::Label bpmLabel;
 
     juce::GroupComponent timingGroup;
     juce::GroupComponent disorderGroup;
     juce::GroupComponent toneGroup;
+    juce::GroupComponent sculptGroup;
 
     juce::Slider bpmBox;
     juce::ToggleButton syncLightButton;
@@ -57,6 +62,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> rateAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> skipAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> brakeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> cutoffAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> resoAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BoutiqueRumbleAudioProcessorEditor)
 };

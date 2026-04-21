@@ -16,6 +16,7 @@ public:
     void setUseHostSync(bool shouldUseHostSync) noexcept;
     bool getUseHostSync() const noexcept;
     double getCurrentClockBpmForUi() const noexcept;
+    void setScopeVisualiser(juce::AudioVisualiserComponent* visualiser) noexcept;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -58,6 +59,9 @@ private:
     std::atomic<float>* rateParam { nullptr };
     std::atomic<float>* skipParam { nullptr };
     std::atomic<float>* brakeParam { nullptr };
+    std::atomic<float>* cutoffParam { nullptr };
+    std::atomic<float>* resoParam { nullptr };
+    juce::AudioVisualiserComponent* mScopeVisualiser { nullptr };
     std::vector<int> mActiveNotes;
     double mInternalPpq { 0.0 };
     std::atomic<double> mDefaultBpm { 120.0 };
