@@ -244,6 +244,7 @@ public:
             rightOut = juce::jlimit(-1.0f, 1.0f, rightOut + subMono);
             leftOut *= mVoice.mNoteGainEnvelope;
             rightOut *= mVoice.mNoteGainEnvelope;
+
             leftOut = mSculptFilter[0].processSample(0, leftOut);
             rightOut = mSculptFilter[1].processSample(0, rightOut);
 

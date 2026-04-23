@@ -26,6 +26,7 @@ public:
     float mNoteGainEnvelope { 0.0f };
     float mAttackStepPerSample { 1.0f };
     float mReleaseStepPerSample { 1.0f };
+    float mDynamicReleaseSeconds { 0.005f };
     float mGirthDrift { 0.0f };
 
     juce::LinearSmoothedValue<float> mMidARatioSmoothed;
@@ -47,28 +48,29 @@ public:
     static constexpr float subDriftMaxCents = 20.0f;
     static constexpr std::array<float, 3> subDriftLfoHz { 0.31f, 0.73f, 1.13f };
     static constexpr float attackTimeSeconds = 0.002f;
-    static constexpr float releaseTimeSeconds = 0.005f;
+    static constexpr float minReleaseTimeSeconds = 0.002f;
     static constexpr float noteEnvelopeSilenceThreshold = 1.0e-6f;
 
     void prepare(double sampleRateHz, float shapeIn, float harmonyIn, float girthIn)
     {
+        mPreparedSampleRateHz = juce::jmax(1.0, sampleRateHz);
         harmony = juce::jlimit(0.0f, 1.0f, harmonyIn);
         shape = juce::jlimit(0.0f, 1.0f, shapeIn);
         mGirthDrift = juce::jlimit(0.0f, 1.0f, girthIn);
 
-        mAttackStepPerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * attackTimeSeconds));
-        updateReleaseEnvelopeCoefficient(sampleRateHz, 120.0, 4.0f);
+        mAttackStepPerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(mPreparedSampleRateHz * attackTimeSeconds));
+        updateReleaseEnvelopeCoefficient(mPreparedSampleRateHz, 120.0, 4.0f);
 
-        activeVoice.sub.prepare(sampleRateHz);
-        activeVoice.midA.prepare(sampleRateHz);
-        activeVoice.midB.prepare(sampleRateHz);
-        shadowVoice.sub.prepare(sampleRateHz);
-        shadowVoice.midA.prepare(sampleRateHz);
-        shadowVoice.midB.prepare(sampleRateHz);
+        activeVoice.sub.prepare(mPreparedSampleRateHz);
+        activeVoice.midA.prepare(mPreparedSampleRateHz);
+        activeVoice.midB.prepare(mPreparedSampleRateHz);
+        shadowVoice.sub.prepare(mPreparedSampleRateHz);
+        shadowVoice.midA.prepare(mPreparedSampleRateHz);
+        shadowVoice.midB.prepare(mPreparedSampleRateHz);
 
         updateFrequencyRatios();
-        mMidARatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
-        mMidBRatioSmoothed.reset(sampleRateHz, glideTimeSeconds);
+        mMidARatioSmoothed.reset(mPreparedSampleRateHz, glideTimeSeconds);
+        mMidBRatioSmoothed.reset(mPreparedSampleRateHz, glideTimeSeconds);
         mMidARatioSmoothed.setCurrentAndTargetValue(mMidARatioTarget);
         mMidBRatioSmoothed.setCurrentAndTargetValue(mMidBRatioTarget);
         mCurrentMidARatio = mMidARatioSmoothed.getCurrentValue();
@@ -79,7 +81,7 @@ public:
         activeVoice.active = false;
         shadowVoice.active = false;
 
-        mShapeSmoothed.reset(sampleRateHz, macroSmoothingSeconds);
+        mShapeSmoothed.reset(mPreparedSampleRateHz, macroSmoothingSeconds);
         mShapeSmoothed.setCurrentAndTargetValue(applyKinkedMacroTaper(shape));
         mShapedShape = mShapeSmoothed.getCurrentValue();
         applyShapeToVoice(activeVoice);
@@ -117,13 +119,15 @@ public:
     void updateReleaseEnvelopeCoefficient(double sampleRateHz, double currentBpm, float subdivisionMultiplier)
     {
         juce::ignoreUnused(currentBpm, subdivisionMultiplier);
-        mReleaseStepPerSample = 1.0f / juce::jmax(1.0f, static_cast<float>(sampleRateHz * releaseTimeSeconds));
+        mPreparedSampleRateHz = juce::jmax(1.0, sampleRateHz);
+        updateDynamicReleaseFromFrequency(static_cast<float>(mPreparedSampleRateHz),
+                                          activeVoice.active ? activeVoice.baseFrequencyHz : mBaseFrequencyHz);
     }
 
     void noteOn(int midiNoteNumber, float velocity, bool legatoRetrigger, bool voiceAlreadyActive,
                 double hostSampleRateHz, double currentBpm, float subdivisionMultiplier)
     {
-        juce::ignoreUnused(legatoRetrigger, voiceAlreadyActive, hostSampleRateHz, currentBpm, subdivisionMultiplier);
+        juce::ignoreUnused(legatoRetrigger, voiceAlreadyActive, currentBpm, subdivisionMultiplier);
 
         if (activeVoice.active && activeVoice.envelope > noteEnvelopeSilenceThreshold)
         {
@@ -137,6 +141,8 @@ public:
 
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
+        mPreparedSampleRateHz = juce::jmax(1.0, hostSampleRateHz);
+        updateDynamicReleaseFromFrequency(static_cast<float>(mPreparedSampleRateHz), mBaseFrequencyHz);
         mActiveMidiNote = static_cast<float>(midiNoteNumber);
 
         initVoice(activeVoice, mBaseFrequencyHz, juce::jlimit(0.0f, 1.0f, velocity));
@@ -180,9 +186,21 @@ public:
         updateVoiceEnvelope(activeVoice);
         updateVoiceEnvelope(shadowVoice);
 
-        const bool anyActive = activeVoice.active || shadowVoice.active;
-        mVelocity = anyActive ? 1.0f : 0.0f;
-        mNoteGainEnvelope = anyActive ? 1.0f : 0.0f;
+        const float activeEnv = activeVoice.active ? juce::jmax(0.0f, activeVoice.envelope) : 0.0f;
+        const float shadowEnv = shadowVoice.active ? juce::jmax(0.0f, shadowVoice.envelope) : 0.0f;
+        mNoteGainEnvelope = juce::jmax(activeEnv, shadowEnv);
+
+        if (mNoteGainEnvelope <= noteEnvelopeSilenceThreshold)
+        {
+            mNoteGainEnvelope = 0.0f;
+            forceDeactivateVoice(activeVoice);
+            forceDeactivateVoice(shadowVoice);
+            mVelocity = 0.0f;
+        }
+        else
+        {
+            mVelocity = 1.0f;
+        }
     }
 
     void tickPitchGlideAndOrganicFrequencies()
@@ -205,6 +223,9 @@ public:
         sub = 0.0f;
         midA = 0.0f;
         midB = 0.0f;
+
+        if (mNoteGainEnvelope <= noteEnvelopeSilenceThreshold)
+            return;
 
         sampleVoice(activeVoice, sub, midA, midB);
         sampleVoice(shadowVoice, sub, midA, midB);
@@ -345,6 +366,7 @@ private:
             mSubFrequencyHz = subHz;
             mMidAFrequencyHz = midAHz;
             mMidBFrequencyHz = midBHz;
+            updateDynamicReleaseFromFrequency(static_cast<float>(mPreparedSampleRateHz), voice.baseFrequencyHz);
         }
     }
 
@@ -371,4 +393,27 @@ private:
         const float cents = mGirthDrift * subDriftMaxCents * sumNorm;
         return std::pow(2.0f, cents / 1200.0f);
     }
+
+    void updateDynamicReleaseFromFrequency(float sampleRateHz, float currentFrequencyHz) noexcept
+    {
+        const float safeHz = juce::jmax(1.0f, currentFrequencyHz);
+        mDynamicReleaseSeconds = juce::jmax(minReleaseTimeSeconds, 0.5f / safeHz);
+        mReleaseStepPerSample = 1.0f / juce::jmax(1.0f, sampleRateHz * mDynamicReleaseSeconds);
+    }
+
+    static void forceDeactivateVoice(VoiceSlot& voice) noexcept
+    {
+        voice.envelope = 0.0f;
+        voice.attackProgress = 0.0f;
+        voice.releaseProgress = 0.0f;
+        voice.releaseStartLevel = 0.0f;
+        voice.active = false;
+        voice.releasing = false;
+        voice.attacking = false;
+        voice.sub.setActive(false);
+        voice.midA.setActive(false);
+        voice.midB.setActive(false);
+    }
+
+    double mPreparedSampleRateHz { 44100.0 };
 };
