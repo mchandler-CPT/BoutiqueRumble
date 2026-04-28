@@ -88,7 +88,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     bpmBox.setIncDecButtonsMode(juce::Slider::incDecButtonsDraggable_Vertical);
     bpmBox.setRange(40.0, 250.0, 1.0);
     bpmBox.setNumDecimalPlacesToDisplay(0);
-    bpmBox.setTextBoxStyle(juce::Slider::TextBoxRight, false, 68, 20);
+    bpmBox.setTextBoxStyle(juce::Slider::TextBoxRight, false, 86, 20);
     bpmBox.setColour(juce::Slider::backgroundColourId, juce::Colour(0xff22201d));
     bpmBox.setColour(juce::Slider::thumbColourId, juce::Colour(0xffc7bb3f));
     bpmBox.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xff1c1a18));
@@ -115,6 +115,48 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     addAndMakeVisible(syncLightButton);
     bpmBox.setEnabled(! syncLightButton.getToggleState());
     bpmBox.setAlpha(syncLightButton.getToggleState() ? 0.55f : 1.0f);
+
+    // Prime preset cache so first button click always has data.
+    audioProcessor.updatePresetList();
+
+    mPrevButton.setButtonText("<");
+    mNextButton.setButtonText(">");
+    mPrevButton.setTooltip("Previous preset");
+    mNextButton.setTooltip("Next preset");
+    mPrevButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a2622));
+    mNextButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a2622));
+    mPrevButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a322b));
+    mNextButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a322b));
+    mPrevButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd7c3a7));
+    mNextButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd7c3a7));
+    mPrevButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7c3a7));
+    mNextButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7c3a7));
+    mPrevButton.onClick = [this]
+    {
+        audioProcessor.loadPreviousPreset();
+        refreshPresetUi();
+        mPresetLabel.setText(audioProcessor.getCurrentPresetDisplayName(), juce::dontSendNotification);
+        mPresetLabel.repaint();
+        repaint(mPresetLabel.getBounds());
+    };
+    mNextButton.onClick = [this]
+    {
+        audioProcessor.loadNextPreset();
+        refreshPresetUi();
+        mPresetLabel.setText(audioProcessor.getCurrentPresetDisplayName(), juce::dontSendNotification);
+        mPresetLabel.repaint();
+        repaint(mPresetLabel.getBounds());
+    };
+    addAndMakeVisible(mPrevButton);
+    addAndMakeVisible(mNextButton);
+
+    mPresetLabel.setText("Init", juce::dontSendNotification);
+    mPresetLabel.setJustificationType(juce::Justification::centred);
+    mPresetLabel.setColour(juce::Label::textColourId, juce::Colour(0xffd5d9e2));
+    mPresetLabel.setColour(juce::Label::backgroundColourId, juce::Colour(0x20101010));
+    mPresetLabel.setInterceptsMouseClicks(false, false); // route click handling to editor for Shift+click save.
+    mPresetLabel.setTooltip("Shift+Click to Quick Save preset");
+    addAndMakeVisible(mPresetLabel);
 
     auto configureGroup = [this] (juce::GroupComponent& group, const juce::String& title)
     {
@@ -157,6 +199,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     bpmBox.setEnabled(! syncLightButton.getToggleState());
     syncLightButton.setVisible(true);
     startTimerHz(30);
+    refreshPresetUi();
 
     setSize (940, 420);
 }
@@ -175,13 +218,21 @@ void BoutiqueRumbleAudioProcessorEditor::paint (juce::Graphics& g)
     auto headerArea = getLocalBounds().removeFromTop(52).reduced(12, 8);
     g.setColour(juce::Colour(0xffd5d9e2));
     g.setFont(juce::FontOptions(20.0f, juce::Font::bold));
-    g.drawFittedText("Boutique Rumble", headerArea.removeFromLeft(280), juce::Justification::centredLeft, 1);
+    //g.drawFittedText("Rumble", headerArea.removeFromLeft(280), juce::Justification::centredLeft, 1);
 }
 
 void BoutiqueRumbleAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds().reduced(12);
-    bounds.removeFromTop(52);
+    auto presetArea = bounds.removeFromTop(28);
+    bounds.removeFromTop(24);
+
+    auto navArea = presetArea.withSizeKeepingCentre(260, presetArea.getHeight());
+    auto prevArea = navArea.removeFromLeft(36).reduced(2, 0);
+    auto nextArea = navArea.removeFromRight(36).reduced(2, 0);
+    mPrevButton.setBounds(prevArea);
+    mNextButton.setBounds(nextArea);
+    mPresetLabel.setBounds(navArea.reduced(4, 0));
 
     auto keyboardArea = bounds.removeFromBottom(84);
     const int keyboardStart = 0;
@@ -243,14 +294,17 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     };
 
     auto timingInner = timingArea.reduced(10, 24);
-    const int timingCellWidth = timingInner.getWidth() / 3;
-    const int timingKnobSize = juce::jlimit(66, 112, juce::jmin(timingCellWidth - 10, timingInner.getHeight() - 24));
+    const int timingInnerWidth = timingInner.getWidth();
+    const int bpmPreferredWidth = juce::jlimit(96, juce::jmax(96, timingInnerWidth - 160), timingInnerWidth - 112);
+    const int macroAvailableWidth = juce::jmax(80, timingInnerWidth - bpmPreferredWidth);
+    const int timingMacroCellWidth = juce::jmax(40, macroAvailableWidth / 2);
+    const int timingKnobSize = juce::jlimit(62, 112, juce::jmin(timingMacroCellWidth - 8, timingInner.getHeight() - 24));
 
-    auto pulseCell = timingInner.removeFromLeft(timingCellWidth);
+    auto pulseCell = timingInner.removeFromLeft(timingMacroCellWidth);
     pulseLabel.setBounds(pulseCell.removeFromTop(20));
     pulseSlider.setBounds(pulseCell.withSizeKeepingCentre(timingKnobSize, timingKnobSize));
 
-    auto rateCell = timingInner.removeFromLeft(timingCellWidth);
+    auto rateCell = timingInner.removeFromLeft(timingMacroCellWidth);
     rateLabel.setBounds(rateCell.removeFromTop(20));
     rateSlider.setBounds(rateCell.withSizeKeepingCentre(timingKnobSize, timingKnobSize));
 
@@ -259,7 +313,7 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     auto syncArea = bpmTopRow.removeFromRight(58);
     bpmLabel.setBounds(bpmTopRow);
     syncLightButton.setBounds(syncArea.reduced(2, 0));
-    bpmBox.setBounds(bpmCell.reduced(8, juce::jmax(8, bpmCell.getHeight() / 3)));
+    bpmBox.setBounds(bpmCell.reduced(4, juce::jmax(8, bpmCell.getHeight() / 3)));
 
     juce::Slider* toneSliders[] = { &shapeSlider, &gritSlider, &harmonySlider, &girthSlider };
     juce::Label* toneLabels[] = { &shapeLabel, &gritLabel, &harmonyLabel, &girthLabel };
@@ -299,4 +353,55 @@ void BoutiqueRumbleAudioProcessorEditor::timerCallback()
     syncLightButton.setColour(juce::ToggleButton::tickColourId, lit);
     syncLightButton.setColour(juce::ToggleButton::tickDisabledColourId, dim);
     repaint(syncLightButton.getBounds());
+}
+
+void BoutiqueRumbleAudioProcessorEditor::mouseUp(const juce::MouseEvent& event)
+{
+    const auto pointInEditor = event.getEventRelativeTo(this).position.toInt();
+    if (mPresetLabel.getBounds().contains(pointInEditor) && event.mods.isShiftDown() && event.mods.isRightButtonDown())
+        promptSavePreset();
+}
+
+void BoutiqueRumbleAudioProcessorEditor::refreshPresetUi()
+{
+    audioProcessor.updatePresetList();
+    const auto& presets = audioProcessor.getPresetList();
+    mSelectedPresetIndex = audioProcessor.getCurrentPresetIndex();
+
+    const bool hasPresets = ! presets.isEmpty();
+    mPrevButton.setEnabled(hasPresets);
+    mNextButton.setEnabled(hasPresets);
+    const auto presetName = juce::File(audioProcessor.getCurrentPresetDisplayName()).getFileName();
+    // Force a visible UI refresh even when loaded preset has identical values.
+    mPresetLabel.setText({}, juce::dontSendNotification);
+    mPresetLabel.setText(presetName, juce::dontSendNotification);
+}
+
+void BoutiqueRumbleAudioProcessorEditor::promptSavePreset()
+{
+    mPresetSaveChooser = std::make_unique<juce::FileChooser>(
+        "Save Boutique Rumble Preset",
+        audioProcessor.getPresetDirectory().getChildFile(mPresetLabel.getText()),
+        "*");
+
+    const int flags = juce::FileBrowserComponent::saveMode
+                    | juce::FileBrowserComponent::canSelectFiles
+                    | juce::FileBrowserComponent::warnAboutOverwriting;
+    mPresetSaveChooser->launchAsync(flags, [this] (const juce::FileChooser& chooser)
+    {
+        const juce::File target = chooser.getResult();
+        if (target != juce::File{})
+        {
+            const juce::String chosenPresetName = target.getFileName().trim();
+            if (! chosenPresetName.isEmpty() && audioProcessor.savePreset(chosenPresetName))
+            {
+                mPresetLabel.setText(target.getFileName(), juce::dontSendNotification);
+                mPresetLabel.repaint();
+                repaint(mPresetLabel.getBounds());
+            }
+        }
+
+        refreshPresetUi();
+        mPresetSaveChooser.reset();
+    });
 }

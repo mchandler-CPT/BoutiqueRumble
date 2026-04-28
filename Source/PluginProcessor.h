@@ -17,6 +17,16 @@ public:
     bool getUseHostSync() const noexcept;
     double getCurrentClockBpmForUi() const noexcept;
     void setScopeVisualiser(juce::AudioVisualiserComponent* visualiser) noexcept;
+    void updatePresetList();
+    bool loadPreset(int index);
+    bool loadNextPreset();
+    bool loadPreviousPreset();
+    void saveCurrentPreset(juce::String name);
+    bool savePreset(const juce::String& name);
+    const juce::StringArray& getPresetList() const noexcept { return mPresetNames; }
+    int getCurrentPresetIndex() const noexcept { return mCurrentPresetIndex; }
+    juce::String getCurrentPresetDisplayName() const;
+    const juce::File& getPresetDirectory() const noexcept { return mPresetDir; }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -62,6 +72,10 @@ private:
     std::atomic<float>* cutoffParam { nullptr };
     std::atomic<float>* resoParam { nullptr };
     juce::AudioVisualiserComponent* mScopeVisualiser { nullptr };
+    juce::File mPresetDir;
+    juce::Array<juce::File> mPresetFiles;
+    juce::StringArray mPresetNames;
+    int mCurrentPresetIndex { -1 };
     std::vector<int> mActiveNotes;
     double mInternalPpq { 0.0 };
     std::atomic<double> mDefaultBpm { 120.0 };

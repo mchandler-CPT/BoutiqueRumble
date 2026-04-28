@@ -13,7 +13,10 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
            .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
         #endif
        ),
-       apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()) // The Handshake
+      apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()), // The Handshake
+      mPresetDir(juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                     .getChildFile("Rumble")
+                     .getChildFile("Presets"))
 {
     pulseParam = apvts.getRawParameterValue(IDs::pulse);
     shapeParam = apvts.getRawParameterValue(IDs::shape);
@@ -26,6 +29,9 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     cutoffParam = apvts.getRawParameterValue(IDs::cutoff);
     resoParam = apvts.getRawParameterValue(IDs::reso);
     rumbleEngine.setBrakeParameter(brakeParam);
+    if (! mPresetDir.exists())
+        mPresetDir.createDirectory();
+    updatePresetList();
 }
 
 BoutiqueRumbleAudioProcessor::~BoutiqueRumbleAudioProcessor() = default;
@@ -58,6 +64,137 @@ double BoutiqueRumbleAudioProcessor::getCurrentClockBpmForUi() const noexcept
 void BoutiqueRumbleAudioProcessor::setScopeVisualiser(juce::AudioVisualiserComponent* visualiser) noexcept
 {
     mScopeVisualiser = visualiser;
+}
+
+void BoutiqueRumbleAudioProcessor::updatePresetList()
+{
+    if (! mPresetDir.exists())
+        mPresetDir.createDirectory();
+
+    mPresetFiles.clear();
+    mPresetNames.clear();
+    const juce::Array<juce::File> files = mPresetDir.findChildFiles(juce::File::TypesOfFileToFind::findFiles, false, "*");
+    for (const auto& file : files)
+    {
+        const auto fileName = file.getFileName();
+        const auto lowerName = fileName.toLowerCase();
+        if (file.isHidden() || lowerName == ".ds_store" || lowerName == "desktop.ini")
+            continue;
+        if (! file.existsAsFile())
+            continue;
+
+        mPresetFiles.add(file);
+    }
+
+    std::sort(mPresetFiles.begin(), mPresetFiles.end(), [] (const juce::File& a, const juce::File& b)
+    {
+        return a.getFileName().compareNatural(b.getFileName()) < 0;
+    });
+
+    for (const auto& file : mPresetFiles)
+        mPresetNames.add(file.getFileName());
+    DBG("Presets found: " + juce::String(mPresetNames.size()));
+
+    if (mPresetNames.isEmpty())
+    {
+        mCurrentPresetIndex = -1;
+        return;
+    }
+
+    if (mCurrentPresetIndex < 0)
+    {
+        mCurrentPresetIndex = 0;
+    }
+    else
+    {
+        mCurrentPresetIndex = juce::jlimit(0, mPresetNames.size() - 1, mCurrentPresetIndex);
+    }
+}
+
+bool BoutiqueRumbleAudioProcessor::loadPreset(int index)
+{
+    updatePresetList();
+    if (index < 0 || index >= mPresetFiles.size())
+        return false;
+
+    DBG("Loading Preset: " + mPresetNames[index]);
+    const auto presetFile = mPresetFiles[index];
+    if (! presetFile.existsAsFile())
+        return false;
+
+    juce::MemoryBlock mb;
+    presetFile.loadFileAsData(mb);
+    std::unique_ptr<juce::XmlElement> xml = getXmlFromBinary(mb.getData(), static_cast<int>(mb.getSize()));
+    if (xml == nullptr)
+        xml = juce::XmlDocument::parse(presetFile);
+
+    if (xml != nullptr && xml->hasTagName(apvts.state.getType()))
+    {
+        apvts.replaceState(juce::ValueTree::fromXml(*xml));
+        mCurrentPresetIndex = index;
+        DBG("Successfully loaded preset: " + presetFile.getFileName());
+        return true;
+    }
+
+    return false;
+}
+
+bool BoutiqueRumbleAudioProcessor::loadNextPreset()
+{
+    updatePresetList();
+    if (mPresetNames.isEmpty())
+        return false;
+
+    mCurrentPresetIndex = (mCurrentPresetIndex + 1) % mPresetNames.size();
+    return loadPreset(mCurrentPresetIndex);
+}
+
+bool BoutiqueRumbleAudioProcessor::loadPreviousPreset()
+{
+    updatePresetList();
+    if (mPresetNames.isEmpty())
+        return false;
+
+    mCurrentPresetIndex = (mCurrentPresetIndex - 1 + mPresetNames.size()) % mPresetNames.size();
+    return loadPreset(mCurrentPresetIndex);
+}
+
+bool BoutiqueRumbleAudioProcessor::savePreset(const juce::String& name)
+{
+    const juce::String trimmedName = name.trim();
+    const juce::String rawFileName = juce::File(trimmedName).getFileName();
+    const juce::String safeName = rawFileName.retainCharacters("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_. ");
+    if (safeName.isEmpty())
+        return false;
+
+    if (! mPresetDir.exists())
+        mPresetDir.createDirectory();
+
+    auto presetFile = mPresetDir.getChildFile(safeName);
+    if (auto xml = apvts.copyState().createXml())
+    {
+        if (xml->writeTo(presetFile))
+        {
+            updatePresetList();
+            for (int i = 0; i < mPresetFiles.size(); ++i)
+            {
+                if (mPresetFiles.getReference(i).getFileName() == presetFile.getFileName())
+                {
+                    mCurrentPresetIndex = i;
+                    break;
+                }
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+juce::String BoutiqueRumbleAudioProcessor::getCurrentPresetDisplayName() const
+{
+    if (mCurrentPresetIndex >= 0 && mCurrentPresetIndex < mPresetNames.size())
+        return mPresetNames[mCurrentPresetIndex];
+    return "Default Rumble";
 }
 
 const juce::String BoutiqueRumbleAudioProcessor::getName() const
@@ -320,16 +457,20 @@ juce::AudioProcessorEditor* BoutiqueRumbleAudioProcessor::createEditor()
 
 void BoutiqueRumbleAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    const auto state = apvts.copyState();
-    if (auto xml = state.createXml())
+    if (auto xml = apvts.copyState().createXml())
     {
-        copyXmlToBinary(*xml, destData);
+        juce::MemoryOutputStream stream(destData, false);
+        xml->writeTo(stream); // Save as clean text XML, no binary wrapper.
     }
 }
 
 void BoutiqueRumbleAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    if (auto xmlState = getXmlFromBinary(data, sizeInBytes))
+    if (data == nullptr || sizeInBytes <= 0)
+        return;
+
+    const juce::String xmlText = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
+    if (auto xmlState = juce::XmlDocument::parse(xmlText))
     {
         if (xmlState->hasTagName(apvts.state.getType()))
         {

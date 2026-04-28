@@ -11,12 +11,12 @@ add_subdirectory("C:/Juce" JUCE)
 
 # 2. Define the Plugin
 juce_add_plugin(BoutiqueRumble
-    COMPANY_NAME "SeniorArchitect"
+    COMPANY_NAME "bdEnergy"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     PLUGIN_CODE "Rumb"      # Unique 4-char ID
     FORMATS VST3 Standalone 
-    PRODUCT_NAME "Boutique Rumble")
+    PRODUCT_NAME "Rumble")
 
 juce_generate_juce_header(BoutiqueRumble)
 
