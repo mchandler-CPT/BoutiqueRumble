@@ -10,8 +10,12 @@ if(APPLE)
 endif()
 
 # 1. Point to your JUCE installation
-# If you copied JUCE into the folder, use add_subdirectory(JUCE)
-add_subdirectory("C:/Juce" JUCE) 
+# JUCE is expected as a repository submodule at ./Juce
+set(JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Juce")
+if(NOT EXISTS "${JUCE_PATH}/CMakeLists.txt")
+    message(FATAL_ERROR "JUCE not found at ${JUCE_PATH}. Ensure submodules are initialized.")
+endif()
+add_subdirectory("${JUCE_PATH}" JUCE)
 
 set(RUMBLE_PLUGIN_FORMATS VST3 Standalone)
 if(APPLE)
