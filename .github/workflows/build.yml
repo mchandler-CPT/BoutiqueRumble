@@ -7,8 +7,11 @@ on:
       - master
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  build-plugin:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -16,18 +19,35 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Configure CMake (Xcode, Universal)
+      - name: Configure CMake (macOS)
+        if: matrix.os == 'macos-latest'
         run: cmake -B build -G Xcode -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 
-      - name: Build
-        run: |
-          cmake --build build --config Release --target Rumble_All || \
-          cmake --build build --config Release --target BoutiqueRumble_All
+      - name: Configure CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Upload macOS Plugin Artifacts
+      - name: Build plugin target
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target Rumble_All
+          if ($LASTEXITCODE -ne 0) {
+            cmake --build build --config Release --target BoutiqueRumble_All
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Upload macOS artifacts
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: rumble-macos-plugins
+          name: rumble-macos
           path: |
             build/BoutiqueRumble_artefacts/Release/VST3/*.vst3
             build/BoutiqueRumble_artefacts/Release/AU/*.component
+
+      - name: Upload Windows artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rumble-windows
+          path: build/BoutiqueRumble_artefacts/Release/VST3/*.vst3
