@@ -1,0 +1,33 @@
+name: Build Rumble
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure CMake (Xcode, Universal)
+        run: cmake -B build -G Xcode -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: |
+          cmake --build build --config Release --target Rumble_All || \
+          cmake --build build --config Release --target BoutiqueRumble_All
+
+      - name: Upload macOS Plugin Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rumble-macos-plugins
+          path: |
+            build/BoutiqueRumble_artefacts/Release/VST3/*.vst3
+            build/BoutiqueRumble_artefacts/Release/AU/*.component

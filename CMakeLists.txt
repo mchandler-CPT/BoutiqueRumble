@@ -5,17 +5,27 @@ project(BoutiqueRumble VERSION 1.0.0 LANGUAGES CXX)
 include(FetchContent)
 include(CTest)
 
+if(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal Binary support" FORCE)
+endif()
+
 # 1. Point to your JUCE installation
 # If you copied JUCE into the folder, use add_subdirectory(JUCE)
 add_subdirectory("C:/Juce" JUCE) 
 
+set(RUMBLE_PLUGIN_FORMATS VST3 Standalone)
+if(APPLE)
+    list(APPEND RUMBLE_PLUGIN_FORMATS AU)
+endif()
+
 # 2. Define the Plugin
 juce_add_plugin(BoutiqueRumble
     COMPANY_NAME "bdEnergy"
+    BUNDLE_ID "com.yourname.rumble"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     PLUGIN_CODE "Rumb"      # Unique 4-char ID
-    FORMATS VST3 Standalone 
+    FORMATS ${RUMBLE_PLUGIN_FORMATS}
     PRODUCT_NAME "Rumble")
 
 juce_generate_juce_header(BoutiqueRumble)
@@ -24,8 +34,12 @@ juce_generate_juce_header(BoutiqueRumble)
 target_sources(BoutiqueRumble PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
+    Source/DSP/BrakePhysics.h
+    Source/DSP/MotifEngine.h
     Source/DSP/Oscillator.h
     Source/DSP/RumbleEngine.h
+    Source/DSP/SignalProcessor.h
+    Source/DSP/VoiceBank.h
     Source/Parameters/ParamConstants.h
     Source/Utils/SlewLimiter.h
     Source/UI/BoutiqueLookAndFeel.cpp
