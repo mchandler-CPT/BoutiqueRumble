@@ -11,9 +11,9 @@ endif()
 
 # 1. Point to your JUCE installation
 # JUCE is expected as a repository submodule at ./Juce
-set(JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Juce")
+set(JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Juce" CACHE PATH "Path to JUCE")
 if(NOT EXISTS "${JUCE_PATH}/CMakeLists.txt")
-    message(FATAL_ERROR "JUCE not found at ${JUCE_PATH}. Ensure submodules are initialized.")
+    message(FATAL_ERROR "JUCE not found at ${JUCE_PATH}. Check submodules!")
 endif()
 add_subdirectory("${JUCE_PATH}" JUCE)
 
