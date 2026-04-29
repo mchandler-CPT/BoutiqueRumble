@@ -14,7 +14,7 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
         #endif
        ),
       apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()), // The Handshake
-      mPresetDir(juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+      mPresetDir(juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                      .getChildFile("Rumble")
                      .getChildFile("Presets"))
 {

@@ -38,6 +38,18 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Install Inno Setup (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: choco install innosetup -y
+
+      - name: Build Windows installer
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path Output -Force | Out-Null
+          iscc installer_win.iss
+
       - name: Package macOS bundles
         if: matrix.os == 'macos-latest'
         shell: bash
@@ -52,7 +64,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path "build/BoutiqueRumble_artefacts/Release/VST3/*.vst3" -DestinationPath "rumble-windows.zip" -Force
+          Compress-Archive -Path "Output/Rumble_Setup.exe" -DestinationPath "rumble-windows.zip" -Force
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
