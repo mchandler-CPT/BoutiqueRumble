@@ -38,21 +38,35 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Package macOS bundles
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -R build/BoutiqueRumble_artefacts/Release/VST3/*.vst3 dist/
+          cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component dist/
+          cd dist
+          zip -r ../rumble-macos.zip ./*.vst3 ./*.component
+
+      - name: Package Windows bundles
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build/BoutiqueRumble_artefacts/Release/VST3/*.vst3" -DestinationPath "rumble-windows.zip" -Force
+
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: rumble-macos
-          path: |
-            build/BoutiqueRumble_artefacts/Release/VST3/*.vst3
-            build/BoutiqueRumble_artefacts/Release/AU/*.component
+          path: rumble-macos.zip
 
       - name: Upload Windows artifacts
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: rumble-windows
-          path: build/BoutiqueRumble_artefacts/Release/VST3/*.vst3
+          path: rumble-windows.zip
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -73,5 +87,4 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/**/*.vst3
-            dist/**/*.component
+            dist/*.zip
