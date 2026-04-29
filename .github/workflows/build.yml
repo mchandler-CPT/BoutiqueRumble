@@ -60,6 +60,7 @@ jobs:
         with:
           name: rumble-macos
           path: rumble-macos.zip
+          if-no-files-found: error
 
       - name: Upload Windows artifacts
         if: matrix.os == 'windows-latest'
@@ -67,6 +68,7 @@ jobs:
         with:
           name: rumble-windows
           path: rumble-windows.zip
+          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
