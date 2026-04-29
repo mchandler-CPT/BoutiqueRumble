@@ -60,6 +60,27 @@ jobs:
           cd dist
           zip -r ../rumble-macos.zip ./*.vst3 ./*.component
 
+      - name: Build macOS pkg installer
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          rm -rf STAGING
+          mkdir -p "STAGING/Library/Audio/Plug-Ins/VST3"
+          mkdir -p "STAGING/Library/Audio/Plug-Ins/Components"
+          mkdir -p "STAGING/Library/Application Support/Rumble/Presets"
+
+          cp -R build/BoutiqueRumble_artefacts/Release/VST3/*.vst3 "STAGING/Library/Audio/Plug-Ins/VST3/"
+          cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "STAGING/Library/Audio/Plug-Ins/Components/"
+          if [ -d "Presets" ]; then
+            cp -R Presets/* "STAGING/Library/Application Support/Rumble/Presets/" || true
+          fi
+
+          pkgbuild --root STAGING \
+                   --identifier com.rumble.pkg.synth \
+                   --version 1.0.0 \
+                   --install-location / \
+                   Rumble_Installer.pkg
+
       - name: Package Windows bundles
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -71,7 +92,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rumble-macos
-          path: rumble-macos.zip
+          path: |
+            rumble-macos.zip
+            Rumble_Installer.pkg
           if-no-files-found: error
 
       - name: Upload Windows artifacts
@@ -102,3 +125,4 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.zip
+            dist/*.pkg
