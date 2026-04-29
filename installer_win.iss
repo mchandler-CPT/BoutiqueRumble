@@ -21,13 +21,13 @@ Name: "desktopmanual"; Description: "Create a Desktop Shortcut for the README ma
 
 [Files]
 ; VST3 bundle (recursive copy)
-Source: "Rumble.vst3\*"; DestDir: "{commoncf}\VST3\Rumble.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "installer_dist\Rumble.vst3\*"; DestDir: "{commoncf}\VST3\Rumble.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Presets
-Source: "Presets\*"; DestDir: "{userappdata}\Rumble\Presets"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "installer_dist\Presets\*"; DestDir: "{userappdata}\Rumble\Presets"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 ; Optional PDF manual (if present in the script directory)
-Source: "README.pdf"; DestDir: "{userdocs}\Rumble"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "installer_dist\README.pdf"; DestDir: "{userdocs}\Rumble"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; Optional desktop shortcut to the manual PDF

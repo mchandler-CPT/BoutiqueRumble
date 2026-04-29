@@ -43,6 +43,20 @@ jobs:
         shell: pwsh
         run: choco install innosetup -y
 
+      - name: Stage for Installer (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "installer_dist" -Force | Out-Null
+          New-Item -ItemType Directory -Path "installer_dist/Presets" -Force | Out-Null
+          Copy-Item -Path "build/BoutiqueRumble_artefacts/Release/VST3/Rumble.vst3" -Destination "installer_dist/" -Recurse -Force
+          if (Test-Path "Presets") {
+            Copy-Item -Path "Presets/*" -Destination "installer_dist/Presets/" -Recurse -Force
+          }
+          if (Test-Path "README.pdf") {
+            Copy-Item -Path "README.pdf" -Destination "installer_dist/" -Force
+          }
+
       - name: Build Windows installer
         if: matrix.os == 'windows-latest'
         shell: pwsh
