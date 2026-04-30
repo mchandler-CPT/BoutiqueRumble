@@ -22,6 +22,7 @@ private:
 
     BoutiqueRumbleAudioProcessor& audioProcessor;
     BoutiqueLookAndFeel boutiqueLookAndFeel;
+    juce::Image rumbleLogo;
     juce::MidiKeyboardComponent keyboardComponent;
     juce::AudioVisualiserComponent waveformVisualiser;
 

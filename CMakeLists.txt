@@ -34,6 +34,11 @@ juce_add_plugin(BoutiqueRumble
 
 juce_generate_juce_header(BoutiqueRumble)
 
+juce_add_binary_data(RumbleAssets
+    SOURCES
+        logo.png
+)
+
 # 3. Add your Source files
 target_sources(BoutiqueRumble PRIVATE
     Source/PluginProcessor.cpp
@@ -55,6 +60,7 @@ target_include_directories(BoutiqueRumble PRIVATE Source)
 # 4. Link the "Boutique" Ingredients
 # These modules are essential for the 'Grit' and 'Girth' logic
 target_link_libraries(BoutiqueRumble PRIVATE
+    RumbleAssets
     juce::juce_audio_utils
     juce::juce_audio_processors
     juce::juce_dsp           # Needed for TPT Filters and Saturation

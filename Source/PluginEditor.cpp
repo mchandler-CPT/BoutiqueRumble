@@ -4,6 +4,7 @@
 BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (BoutiqueRumbleAudioProcessor& p)
     : AudioProcessorEditor (&p),
       audioProcessor (p),
+      rumbleLogo(juce::ImageCache::getFromMemory(BinaryData::logo_png, BinaryData::logo_pngSize)),
       keyboardComponent (audioProcessor.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard),
       waveformVisualiser (1)
 {
@@ -216,9 +217,15 @@ void BoutiqueRumbleAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 
     auto headerArea = getLocalBounds().removeFromTop(52).reduced(12, 8);
-    g.setColour(juce::Colour(0xffd5d9e2));
-    g.setFont(juce::FontOptions(20.0f, juce::Font::bold));
-    //g.drawFittedText("Rumble", headerArea.removeFromLeft(280), juce::Justification::centredLeft, 1);
+    if (rumbleLogo.isValid())
+    {
+        g.drawImageWithin(rumbleLogo,
+                          headerArea.getX(),
+                          headerArea.getY() + 4,
+                          340,
+                          headerArea.getHeight(),
+                          juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
+    }
 }
 
 void BoutiqueRumbleAudioProcessorEditor::resized()
