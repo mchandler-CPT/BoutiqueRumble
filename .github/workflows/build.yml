@@ -94,12 +94,6 @@ jobs:
                    --install-location / \
                    Rumble_Installer.pkg
 
-      - name: Package Windows bundles
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "Output/Rumble_Setup.exe" -DestinationPath "rumble-windows.zip" -Force
-
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
@@ -115,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rumble-windows
-          path: rumble-windows.zip
+          path: Output/Rumble_Setup.exe
           if-no-files-found: error
 
   release:
@@ -139,3 +133,4 @@ jobs:
           files: |
             dist/*.zip
             dist/*.pkg
+            dist/Output/Rumble_Setup.exe

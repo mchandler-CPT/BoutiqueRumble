@@ -9,8 +9,11 @@ DefaultDirName={autopf}\Rumble
 DefaultGroupName=Rumble
 DisableDirPage=yes
 DisableProgramGroupPage=yes
-Compression=lzma
-SolidCompression=yes
+Compression=zip
+SolidCompression=no
+VersionInfoCompany=Mark Chandler / Rumble
+VersionInfoDescription=Rumble Synthesizer Installer
+VersionInfoVersion=1.0.0.0
 WizardStyle=modern
 
 ; Optional: uncomment and point to your icon if available.
