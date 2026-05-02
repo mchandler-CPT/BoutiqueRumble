@@ -108,7 +108,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: rumble-windows
+          name: rumble-windows-build
           path: Output/Rumble_Setup.exe
           if-no-files-found: error
 
@@ -131,6 +131,6 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/*.zip
-            dist/*.pkg
-            dist/Output/Rumble_Setup.exe
+            dist/rumble-macos.zip
+            dist/Rumble_Installer.pkg
+            dist/Rumble_Setup.exe
