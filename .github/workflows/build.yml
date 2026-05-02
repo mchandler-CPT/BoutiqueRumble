@@ -48,17 +48,13 @@ jobs:
 
       - name: Stage for Installer (Windows)
         if: matrix.os == 'windows-latest'
-        shell: pwsh
+        shell: cmd
         run: |
-          New-Item -ItemType Directory -Path "installer_dist" -Force | Out-Null
-          New-Item -ItemType Directory -Path "installer_dist/Presets" -Force | Out-Null
-          Copy-Item -Path "build/BoutiqueRumble_artefacts/Release/VST3/Rumble.vst3" -Destination "installer_dist/" -Recurse -Force
-          if (Test-Path "Presets") {
-            Copy-Item -Path "Presets/*" -Destination "installer_dist/Presets/" -Recurse -Force
-          }
-          if (Test-Path "README.pdf") {
-            Copy-Item -Path "README.pdf" -Destination "installer_dist/" -Force
-          }
+          if not exist installer_dist mkdir installer_dist
+          if not exist installer_dist\Presets mkdir installer_dist\Presets
+          xcopy /E /I /Y "build\BoutiqueRumble_artefacts\Release\VST3\*.vst3" "installer_dist\Rumble.vst3"
+          if exist Presets xcopy /E /I /Y Presets installer_dist\Presets
+          if exist README.pdf copy /Y README.pdf installer_dist\
 
       - name: Build Windows installer
         if: matrix.os == 'windows-latest'
@@ -84,12 +80,12 @@ jobs:
           rm -rf STAGING
           mkdir -p "STAGING/Library/Audio/Plug-Ins/VST3"
           mkdir -p "STAGING/Library/Audio/Plug-Ins/Components"
-          mkdir -p "STAGING/Library/Application Support/Rumble/Presets"
+          mkdir -p STAGING/Library/Application\ Support/Rumble/Presets/
 
           cp -R build/BoutiqueRumble_artefacts/Release/VST3/*.vst3 "STAGING/Library/Audio/Plug-Ins/VST3/"
           cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "STAGING/Library/Audio/Plug-Ins/Components/"
           if [ -d "Presets" ]; then
-            cp -R Presets/* "STAGING/Library/Application Support/Rumble/Presets/" || true
+            cp -R Presets/* STAGING/Library/Application\ Support/Rumble/Presets/ || true
           fi
 
           pkgbuild --root STAGING \
