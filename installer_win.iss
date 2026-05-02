@@ -3,6 +3,10 @@ AppId={{D1A0A4A6-5E8C-4B5D-8F0E-6A2E84A4F7D4}
 AppName=Rumble
 AppVersion=1.0.0-beta
 AppPublisher=Mark Chandler / Rumble
+PrivilegesRequired=admin
+; 64-bit hosts must install VST3 under native Common Files (not WOW64 Program Files (x86)).
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64
 OutputDir=Output
 OutputBaseFilename=Rumble_Setup
 DefaultDirName={autopf}\Rumble
