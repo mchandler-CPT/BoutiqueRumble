@@ -446,11 +446,10 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float gritClamped = juce::jlimit(0.0f, 1.0f, grit);
     const float shapeGainComp = juce::jmap(shapeClamped, 0.0f, 1.0f, 1.25f, 0.8f);
     const float gritCompSquare = 1.0f - (std::pow(gritClamped, 2.0f) * 0.35f);
-    const float shapeForSineGrit = juce::jmin(0.5f, shapeClamped);
-    const float sineGritPenalty = juce::jmap(shapeForSineGrit, 0.0f, 0.5f, 0.7f, 1.0f);
-    const float finalGritComp = gritCompSquare * sineGritPenalty;
     const float preGain = masterOutputLevel * shapeGainComp;
     const float clipperDrive = juce::jmap(shapeClamped, 0.0f, 1.0f, 1.32f, 1.05f);
+    const float bias = 0.05f;
+    const float biasComp = std::tanh(bias);
 
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
@@ -458,8 +457,9 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
             float s = d[i] * preGain;
-            s = std::tanh(s * clipperDrive);
-            d[i] = s * finalGritComp;
+            // Asymmetric tanh: add DC bias for even harmonics, then remove the static offset.
+            s = std::tanh((s * clipperDrive) + bias) - biasComp;
+            d[i] = s * gritCompSquare;
         }
     }
 

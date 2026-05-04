@@ -247,6 +247,10 @@ public:
 
             leftOut = mSculptFilter[0].processSample(0, leftOut);
             rightOut = mSculptFilter[1].processSample(0, rightOut);
+            const float resonanceNorm = juce::jlimit(0.0f, 1.0f, (mResonanceQ - 0.1f) / 19.9f);
+            const float sculptMakeup = 1.0f + (resonanceNorm * 0.05f);
+            leftOut *= sculptMakeup;
+            rightOut *= sculptMakeup;
 
             if (mVoice.mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
             {
