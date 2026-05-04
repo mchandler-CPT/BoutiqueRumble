@@ -32,6 +32,7 @@ public:
     juce::LinearSmoothedValue<float> mMidARatioSmoothed;
     juce::LinearSmoothedValue<float> mMidBRatioSmoothed;
     juce::LinearSmoothedValue<float> mShapeSmoothed;
+    juce::LinearSmoothedValue<float> mBaseFrequencySmoothed;
 
     std::array<double, 3> mSubDriftLfoTheta {};
 
@@ -71,8 +72,10 @@ public:
         updateFrequencyRatios();
         mMidARatioSmoothed.reset(mPreparedSampleRateHz, glideTimeSeconds);
         mMidBRatioSmoothed.reset(mPreparedSampleRateHz, glideTimeSeconds);
+        mBaseFrequencySmoothed.reset(mPreparedSampleRateHz, glideTimeSeconds);
         mMidARatioSmoothed.setCurrentAndTargetValue(mMidARatioTarget);
         mMidBRatioSmoothed.setCurrentAndTargetValue(mMidBRatioTarget);
+        mBaseFrequencySmoothed.setCurrentAndTargetValue(mBaseFrequencyHz);
         mCurrentMidARatio = mMidARatioSmoothed.getCurrentValue();
         mCurrentMidBRatio = mMidBRatioSmoothed.getCurrentValue();
 
@@ -141,19 +144,20 @@ public:
 
         const float noteFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         mBaseFrequencyHz = juce::jlimit(1.0f, 20000.0f, noteFrequency);
+        if (activeVoice.active || shadowVoice.active)
+            mBaseFrequencySmoothed.setTargetValue(mBaseFrequencyHz);
+        else
+            mBaseFrequencySmoothed.setCurrentAndTargetValue(mBaseFrequencyHz);
         mPreparedSampleRateHz = juce::jmax(1.0, hostSampleRateHz);
         updateDynamicReleaseFromFrequency(static_cast<float>(mPreparedSampleRateHz), mBaseFrequencyHz);
         mActiveMidiNote = static_cast<float>(midiNoteNumber);
 
-        initVoice(activeVoice, mBaseFrequencyHz, juce::jlimit(0.0f, 1.0f, velocity));
+        initVoice(activeVoice, mBaseFrequencySmoothed.getCurrentValue(), juce::jlimit(0.0f, 1.0f, velocity));
         activeVoice.active = true;
         activeVoice.attacking = true;
         activeVoice.releasing = false;
 
         updateVoiceFrequencies(activeVoice);
-        activeVoice.sub.resetPhase(0.0f);
-        activeVoice.midA.resetPhase(0.0f);
-        activeVoice.midB.resetPhase(0.0f);
         activeVoice.sub.setActive(true);
         activeVoice.midA.setActive(true);
         activeVoice.midB.setActive(true);
@@ -205,6 +209,9 @@ public:
 
     void tickPitchGlideAndOrganicFrequencies()
     {
+        const float baseHz = mBaseFrequencySmoothed.getNextValue();
+        if (activeVoice.active)
+            activeVoice.baseFrequencyHz = baseHz;
         mCurrentMidARatio = mMidARatioSmoothed.getNextValue();
         mCurrentMidBRatio = mMidBRatioSmoothed.getNextValue();
         updateVoiceFrequencies(activeVoice);
