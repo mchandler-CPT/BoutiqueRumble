@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<RUMBLE_PARAMS>
+  <PARAM id="BRAKE" value="0.0"/>
+  <PARAM id="CUTOFF" value="20000.0"/>
+  <PARAM id="GIRTH" value="0.0"/>
+  <PARAM id="GRIT" value="0.1700000017881393"/>
+  <PARAM id="HARMONY" value="0.5"/>
+  <PARAM id="PULSE" value="1.0"/>
+  <PARAM id="RATE" value="5.0"/>
+  <PARAM id="RESO" value="2.289999961853027"/>
+  <PARAM id="SHAPE" value="0.3700000047683716"/>
+  <PARAM id="skip_prob" value="0.0"/>
+</RUMBLE_PARAMS>
