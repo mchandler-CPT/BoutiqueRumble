@@ -6,7 +6,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
       audioProcessor (p),
       rumbleLogo(juce::ImageCache::getFromMemory(BinaryData::logo_png, BinaryData::logo_pngSize)),
       keyboardComponent (audioProcessor.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard),
-      waveformVisualiser (1)
+      waveformVisualiser (2)
 {
     setLookAndFeel(&boutiqueLookAndFeel);
 
@@ -193,6 +193,7 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     waveformVisualiser.setRepaintRate(30);
     waveformVisualiser.setColours(juce::Colour(0x22101010), juce::Colour(0xffc87f2f));
     addAndMakeVisible(waveformVisualiser);
+    // Scope audio: processor calls pushBuffer (final post-master buffer) each processBlock.
     audioProcessor.setScopeVisualiser(&waveformVisualiser);
 
     bpmLabel.setVisible(true);

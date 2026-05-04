@@ -86,4 +86,6 @@ private:
     std::atomic<bool> mUseHostSync { true };
    #endif
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    static constexpr float masterOutputLevel = 0.35f;
 };

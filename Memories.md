@@ -74,6 +74,10 @@
 - Focus on "Separation" and "Vibe" over clinical phase perfection.
 - Support for "Sub-Drift" to create independent movement between the sub and mids.
 
+## May 2026 Updates / Technical Hardening
+- **[2026-05-04] Master output gain + tanh ceiling**: Introduced `masterOutputLevel` plus a shape-dependent `tanh` soft-clipper on the final bus (initially −6 dB / fixed drive; later folded into the Volume Normalization pass below). **Reason**: Address “too hot” output from beta testing and avoid digital clipping while keeping a boutique saturation character. **Note**: Output ceiling is lowered without changing DSP phase order or oscillator routing; subsequent passes retune level and clipper drive only.
+- **[2026-05-04] Volume Normalization Pass**: SHAPE `jmap` (0.0→1.25, 1.0→0.8); `preGain = masterOutputLevel * shapeGainComp` into shape-dependent `clipperDrive` (higher at sine, lower at saw). Post-clipper grit: `gritCompSquare = 1 - grit²·0.35`, then `finalGritComp = gritCompSquare * sineGritPenalty` where `sineGritPenalty = jmap(min(shape,0.5), 0…0.5, 0.7…1.0)` so low-SHAPE (sine) grit gets up to an extra ~30% attenuation vs saw-range shapes. **`masterOutputLevel` is 0.35** (headroom vs earlier 0.5). **Change**: Lowered `masterOutputLevel` to 0.35 and added `sineGritPenalty` (extra reduction for gritted sines). **Reason**: Digital clipping on high-grit / low-shape combinations; quadratic post-clip grit tame alone was insufficient vs GRIT manifold RMS. **UI**: `AudioVisualiserComponent` set to **2 channels** to match stereo `pushBuffer` from `processBlock` (final buffer after gain chain) for clipping checks at the scope edges.
+
 ## Current Technical Debt / Next Steps
 - Improve monophonic MIDI handling to include legato/last-note-priority behavior instead of immediate global note-off.
 - `Base 5` Macros are functionally complete.
