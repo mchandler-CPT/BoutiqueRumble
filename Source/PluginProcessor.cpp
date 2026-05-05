@@ -93,7 +93,6 @@ void BoutiqueRumbleAudioProcessor::updatePresetList()
 
     for (const auto& file : mPresetFiles)
         mPresetNames.add(file.getFileName());
-    DBG("Presets found: " + juce::String(mPresetNames.size()));
 
     if (mPresetNames.isEmpty())
     {
@@ -117,7 +116,6 @@ bool BoutiqueRumbleAudioProcessor::loadPreset(int index)
     if (index < 0 || index >= mPresetFiles.size())
         return false;
 
-    DBG("Loading Preset: " + mPresetNames[index]);
     const auto presetFile = mPresetFiles[index];
     if (! presetFile.existsAsFile())
         return false;
@@ -132,7 +130,6 @@ bool BoutiqueRumbleAudioProcessor::loadPreset(int index)
     {
         apvts.replaceState(juce::ValueTree::fromXml(*xml));
         mCurrentPresetIndex = index;
-        DBG("Successfully loaded preset: " + presetFile.getFileName());
         return true;
     }
 

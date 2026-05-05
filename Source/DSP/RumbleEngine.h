@@ -58,11 +58,6 @@ public:
         mSculptTailHoldoffSamples = juce::jmax(1, juce::roundToInt(sampleRateHz * sculptTailHoldoffSeconds));
         mSculptTailHoldoffCounter = 0;
         noteOff();
-#if JUCE_DEBUG
-        mDbgHadPreviousOnset = false;
-        mDbgLastOnsetSampleIndex = 0;
-        mGlobalAudioSampleCounterForDbg = 0;
-#endif
     }
 
     void setBrakeParameter(std::atomic<float>* param) noexcept
@@ -207,9 +202,6 @@ public:
                     filt.setResonance(mCurrentResoSmoothed);
                 }
             }
-#if JUCE_DEBUG
-            ++mGlobalAudioSampleCounterForDbg;
-#endif
             mVoice.advanceSubDriftLfos(sampleRateHz);
 
             const float breakAmount = mBrake.next(sampleRateHz);
@@ -312,24 +304,6 @@ public:
             pulsePhase += gatePhaseIncrement;
             if (pulsePhase >= 1.0)
             {
-#if JUCE_DEBUG
-                if (mIsTransportPlaying)
-                {
-                    if (mDbgHadPreviousOnset)
-                    {
-                        const double dtMs = static_cast<double>(mGlobalAudioSampleCounterForDbg - mDbgLastOnsetSampleIndex)
-                            * (1000.0 / sampleRateHz);
-                        ++mDbgOnsetLogCounter;
-                        if ((mDbgOnsetLogCounter % 8u) == 0u)
-                        {
-                            DBG("[RumbleEngine] timeBetweenOnsets = " << dtMs << " ms @ Girth=" << mGirth);
-                        }
-                    }
-
-                    mDbgHadPreviousOnset = true;
-                    mDbgLastOnsetSampleIndex = mGlobalAudioSampleCounterForDbg;
-                }
-#endif
                 pulsePhase -= std::floor(pulsePhase);
                 refreshBrakeStumbleOnPulseWrap(breakAmount);
                 mMotif.advanceOnPulseWrap(mCurrentPpqPosition, mHasHostPpq);
@@ -687,10 +661,4 @@ private:
     int mSculptTailHoldoffSamples { 0 };
     int mSculptTailHoldoffCounter { 0 };
 
-#if JUCE_DEBUG
-    uint64_t mGlobalAudioSampleCounterForDbg { 0 };
-    uint64_t mDbgLastOnsetSampleIndex { 0 };
-    uint32_t mDbgOnsetLogCounter { 0 };
-    bool mDbgHadPreviousOnset { false };
-#endif
 };
