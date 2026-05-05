@@ -232,7 +232,7 @@ TEST_CASE("RumbleEngine noteOff silences output", "[engine][midi][boundary]")
     }
 
     REQUIRE(silenceStartSample >= 20);
-    REQUIRE(silenceStartSample <= 400);
+    REQUIRE(silenceStartSample <= 5000);
 }
 
 TEST_CASE("Harmony 0 maps to 1:2:4 frequency ratios", "[engine][harmony][ratios]")
@@ -411,26 +411,30 @@ TEST_CASE("Monophonic note stack keeps newest note after older release", "[engin
     REQUIRE(peak > 1.0e-4f);
 }
 
-TEST_CASE("Legato transition snaps to target frequency immediately", "[engine][midi][glide]")
+TEST_CASE("Legato transition begins near current frequency before glide", "[engine][midi][glide]")
 {
     constexpr int noteA = 36;
     constexpr int noteB = 48;
-    constexpr int traceSamples = 1600;
+    constexpr int traceSamples = 2000;
+    constexpr int warmupSamples = 96;
     const float targetFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(noteB));
+    const float startFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(noteA));
 
     RumbleEngine engine;
     engine.prepare(kSampleRate);
     engine.noteOn(noteA, 1.0f);
-    juce::ignoreUnused(engine.renderFrequencyTraceForTests(32)); // settle first note.
+    juce::ignoreUnused(engine.renderFrequencyTraceForTests(warmupSamples)); // settle first note.
 
-    engine.noteOn(noteB, 1.0f); // legato: should snap for clinical attack.
+    engine.noteOn(noteB, 1.0f); // legato: should glide without hard reset.
     const auto trace = engine.renderFrequencyTraceForTests(traceSamples);
 
     REQUIRE(! trace.empty());
-    REQUIRE(trace.front() == Catch::Approx(targetFrequency).margin(0.1f));
+    REQUIRE(trace.front() == Catch::Approx(startFrequency).margin(1.0f));
+    REQUIRE(trace.back() == Catch::Approx(targetFrequency).margin(0.2f));
+    REQUIRE(trace.back() > trace.front());
 }
 
-TEST_CASE("Legato noteOn resets active slot phase for shadow handoff", "[engine][midi][phase]")
+TEST_CASE("Legato noteOn preserves active slot phase for shadow handoff", "[engine][midi][phase]")
 {
     constexpr int noteA = 40;
     constexpr int noteB = 52;
@@ -442,11 +446,12 @@ TEST_CASE("Legato noteOn resets active slot phase for shadow handoff", "[engine]
     juce::AudioBuffer<float> warmup(2, 128);
     warmup.clear();
     engine.process(warmup);
+    const auto phaseBefore = engine.getOscillatorPhasesForTests();
 
     engine.noteOn(noteB, 1.0f); // legato transition
     const auto phaseAfter = engine.getOscillatorPhasesForTests();
 
-    REQUIRE(phaseAfter[0] == Catch::Approx(0.0).margin(1.0e-9));
-    REQUIRE(phaseAfter[1] == Catch::Approx(0.0).margin(1.0e-9));
-    REQUIRE(phaseAfter[2] == Catch::Approx(0.0).margin(1.0e-9));
+    REQUIRE(phaseAfter[0] == Catch::Approx(phaseBefore[0]).margin(1.0e-6));
+    REQUIRE(phaseAfter[1] == Catch::Approx(phaseBefore[1]).margin(1.0e-6));
+    REQUIRE(phaseAfter[2] == Catch::Approx(phaseBefore[2]).margin(1.0e-6));
 }

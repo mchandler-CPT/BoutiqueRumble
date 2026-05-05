@@ -85,6 +85,9 @@ add_executable(BoutiqueTests
     Tests/OscillatorTests.cpp
     Tests/EngineTests.cpp
     Tests/SlewTests.cpp
+    Tests/MotifEngineTests.cpp
+    Tests/SignalProcessorTests.cpp
+    Tests/BrakePhysicsTests.cpp
 )
 
 target_include_directories(BoutiqueTests PRIVATE Source)

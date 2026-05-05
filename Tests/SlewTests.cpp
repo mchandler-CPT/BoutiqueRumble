@@ -112,7 +112,7 @@ TEST_CASE("Girth 0 and Pulse 0.1 produce a sharp percussive ping", "[slew][lfo][
     REQUIRE(envelope[midpoint] < 0.2f);
 }
 
-TEST_CASE("Legato second note resets active slot phase in shadow crossfade", "[slew][legato][phase]")
+TEST_CASE("Legato second note preserves active slot phase in shadow crossfade", "[slew][legato][phase]")
 {
     RumbleEngine engine;
     engine.prepare(48000.0);
@@ -121,13 +121,14 @@ TEST_CASE("Legato second note resets active slot phase in shadow crossfade", "[s
     juce::AudioBuffer<float> warmup(2, 128);
     warmup.clear();
     engine.process(warmup);
+    const auto phaseBefore = engine.getOscillatorPhasesForTests();
 
     engine.noteOn(52, 1.0f); // legato transition
     const auto phaseAfter = engine.getOscillatorPhasesForTests();
 
-    REQUIRE(phaseAfter[0] == Catch::Approx(0.0).margin(1.0e-9));
-    REQUIRE(phaseAfter[1] == Catch::Approx(0.0).margin(1.0e-9));
-    REQUIRE(phaseAfter[2] == Catch::Approx(0.0).margin(1.0e-9));
+    REQUIRE(phaseAfter[0] == Catch::Approx(phaseBefore[0]).margin(1.0e-6));
+    REQUIRE(phaseAfter[1] == Catch::Approx(phaseBefore[1]).margin(1.0e-6));
+    REQUIRE(phaseAfter[2] == Catch::Approx(phaseBefore[2]).margin(1.0e-6));
 }
 
 TEST_CASE("Legato transition avoids zero-value sample discontinuity", "[slew][legato][continuity]")
