@@ -44,11 +44,19 @@ public:
             filt.setCutoffFrequency(mCutoffHz);
             filt.setResonance(mResonanceQ);
         }
+        mCutoffSmoothed.reset(sampleRateHz, sculptSmoothingSeconds);
+        mResoSmoothed.reset(sampleRateHz, sculptSmoothingSeconds);
+        mCutoffSmoothed.setCurrentAndTargetValue(mCutoffHz);
+        mResoSmoothed.setCurrentAndTargetValue(mResonanceQ);
+        mCurrentCutoffSmoothed = mCutoffHz;
+        mCurrentResoSmoothed = mResonanceQ;
         mMotif.prepareState();
         mGateRetriggerDipSamplesRemaining = 0;
         mBrake.prepare(sampleRateHz, brakeSmootherSeconds);
         mBrakeFreeRunningPulseIndex = -1;
         mBrakeHiccupThisPulse = false;
+        mSculptTailHoldoffSamples = juce::jmax(1, juce::roundToInt(sampleRateHz * sculptTailHoldoffSeconds));
+        mSculptTailHoldoffCounter = 0;
         noteOff();
 #if JUCE_DEBUG
         mDbgHadPreviousOnset = false;
@@ -128,15 +136,13 @@ public:
     void setCutoff(float newCutoffHz) noexcept
     {
         mCutoffHz = juce::jlimit(20.0f, 20000.0f, newCutoffHz);
-        for (auto& filt : mSculptFilter)
-            filt.setCutoffFrequency(mCutoffHz);
+        mCutoffSmoothed.setTargetValue(mCutoffHz);
     }
 
     void setResonance(float newQ) noexcept
     {
         mResonanceQ = juce::jlimit(0.1f, 20.0f, newQ);
-        for (auto& filt : mSculptFilter)
-            filt.setResonance(mResonanceQ);
+        mResoSmoothed.setTargetValue(mResonanceQ);
     }
 
     void setTransportInfo(double bpm, double ppqPosition, bool isPlaying, bool hasPpqPosition)
@@ -191,6 +197,16 @@ public:
 
         for (int sample = 0; sample < numSamples; ++sample)
         {
+            mCurrentCutoffSmoothed = mCutoffSmoothed.getNextValue();
+            mCurrentResoSmoothed = mResoSmoothed.getNextValue();
+            if ((sample & (sculptCoeffUpdateStride - 1)) == 0)
+            {
+                for (auto& filt : mSculptFilter)
+                {
+                    filt.setCutoffFrequency(mCurrentCutoffSmoothed);
+                    filt.setResonance(mCurrentResoSmoothed);
+                }
+            }
 #if JUCE_DEBUG
             ++mGlobalAudioSampleCounterForDbg;
 #endif
@@ -247,23 +263,39 @@ public:
 
             leftOut = mSculptFilter[0].processSample(0, leftOut);
             rightOut = mSculptFilter[1].processSample(0, rightOut);
-            const float resonanceNorm = juce::jlimit(0.0f, 1.0f, (mResonanceQ - 0.1f) / 19.9f);
+            const float resonanceNorm = juce::jlimit(0.0f, 1.0f, (mCurrentResoSmoothed - 0.1f) / 19.9f);
             const float sculptMakeup = 1.0f + (resonanceNorm * 0.05f);
             leftOut *= sculptMakeup;
             rightOut *= sculptMakeup;
 
+            if (mVoice.mNoteGainEnvelope > 0.0f || mIsNoteSustaining)
+            {
+                mSculptTailHoldoffCounter = mSculptTailHoldoffSamples;
+            }
+
+            leftOut = mSignal.processSafety(0, leftOut);
+            if (numOutputChannels > 1)
+            {
+                rightOut = mSignal.processSafety(1, rightOut);
+            }
+
             if (mVoice.mNoteGainEnvelope <= 0.0f && ! mIsNoteSustaining)
             {
-                leftOut = 0.0f;
-                rightOut = 0.0f;
-                mSignal.resetSafety();
-            }
-            else
-            {
-                leftOut = mSignal.processSafety(0, leftOut);
-                if (numOutputChannels > 1)
+                if (mSculptTailHoldoffCounter > 0)
                 {
-                    rightOut = mSignal.processSafety(1, rightOut);
+                    --mSculptTailHoldoffCounter;
+                }
+                else
+                {
+                    const float tailMagnitude = juce::jmax(std::abs(leftOut), std::abs(rightOut));
+                    if (tailMagnitude < sculptTailSilenceThreshold)
+                    {
+                        leftOut = 0.0f;
+                        rightOut = 0.0f;
+                        mSignal.resetSafety();
+                        for (auto& filt : mSculptFilter)
+                            filt.reset();
+                    }
                 }
             }
 
@@ -644,6 +676,16 @@ private:
     std::array<juce::dsp::StateVariableTPTFilter<float>, 2> mSculptFilter;
     float mCutoffHz { 20000.0f };
     float mResonanceQ { 0.707f };
+    juce::LinearSmoothedValue<float> mCutoffSmoothed;
+    juce::LinearSmoothedValue<float> mResoSmoothed;
+    float mCurrentCutoffSmoothed { 20000.0f };
+    float mCurrentResoSmoothed { 0.707f };
+    static constexpr double sculptSmoothingSeconds = 0.03;
+    static constexpr int sculptCoeffUpdateStride = 8;
+    static constexpr double sculptTailHoldoffSeconds = 0.02;
+    static constexpr float sculptTailSilenceThreshold = 1.0e-4f;
+    int mSculptTailHoldoffSamples { 0 };
+    int mSculptTailHoldoffCounter { 0 };
 
 #if JUCE_DEBUG
     uint64_t mGlobalAudioSampleCounterForDbg { 0 };

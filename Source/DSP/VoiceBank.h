@@ -404,7 +404,8 @@ private:
     void updateDynamicReleaseFromFrequency(float sampleRateHz, float currentFrequencyHz) noexcept
     {
         const float safeHz = juce::jmax(1.0f, currentFrequencyHz);
-        mDynamicReleaseSeconds = juce::jmax(minReleaseTimeSeconds, 0.5f / safeHz);
+        const float minReleaseFromPeriod = 1.5f / safeHz;
+        mDynamicReleaseSeconds = juce::jmax(minReleaseTimeSeconds, minReleaseFromPeriod);
         mReleaseStepPerSample = 1.0f / juce::jmax(1.0f, sampleRateHz * mDynamicReleaseSeconds);
     }
 

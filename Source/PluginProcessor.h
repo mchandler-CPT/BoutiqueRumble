@@ -88,4 +88,7 @@ private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     static constexpr float masterOutputLevel = 0.35f;
+    static constexpr float outputDcBlockCoeff = 0.995f;
+    std::vector<float> mOutputDcBlockPrevIn;
+    std::vector<float> mOutputDcBlockPrevOut;
 };

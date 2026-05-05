@@ -262,11 +262,16 @@ void BoutiqueRumbleAudioProcessor::prepareToPlay (double sampleRate, int samples
     juce::ignoreUnused(samplesPerBlock);
     mInternalPpq = 0.0;
     mActiveNotes.clear();
+    const int numChannels = juce::jmax(1, getTotalNumOutputChannels());
+    mOutputDcBlockPrevIn.assign(static_cast<size_t>(numChannels), 0.0f);
+    mOutputDcBlockPrevOut.assign(static_cast<size_t>(numChannels), 0.0f);
     rumbleEngine.prepare(sampleRate);
 }
 
 void BoutiqueRumbleAudioProcessor::releaseResources()
 {
+    mOutputDcBlockPrevIn.clear();
+    mOutputDcBlockPrevOut.clear();
 }
 
 #if ! JucePlugin_PreferredChannelConfigurations
@@ -444,12 +449,10 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
     const float shapeClamped = juce::jlimit(0.0f, 1.0f, shape);
     const float gritClamped = juce::jlimit(0.0f, 1.0f, grit);
-    const float shapeGainComp = juce::jmap(shapeClamped, 0.0f, 1.0f, 1.25f, 0.8f);
-    const float gritCompSquare = 1.0f - (std::pow(gritClamped, 2.0f) * 0.35f);
-    const float preGain = masterOutputLevel * shapeGainComp;
-    const float clipperDrive = juce::jmap(shapeClamped, 0.0f, 1.0f, 1.32f, 1.05f);
-    const float bias = 0.05f;
-    const float biasComp = std::tanh(bias);
+    const float preGain = masterOutputLevel;
+    const float shapePenalty = juce::jmap(shapeClamped, 0.0f, 1.0f, 1.0f, 0.55f);
+    const float gritPenalty = 1.0f - (std::pow(gritClamped, 1.5f) * 0.65f);
+    const float finalPostGain = shapePenalty * gritPenalty;
 
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
@@ -457,10 +460,33 @@ void BoutiqueRumbleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
             float s = d[i] * preGain;
-            // Asymmetric tanh: add DC bias for even harmonics, then remove the static offset.
-            s = std::tanh((s * clipperDrive) + bias) - biasComp;
-            d[i] = s * gritCompSquare;
+            s = std::tanh(s * 1.2f);
+            d[i] = s * finalPostGain;
         }
+    }
+
+    // Final safety rail: remove any post-clipper DC as the last stage in the processor chain.
+    const int numChannels = buffer.getNumChannels();
+    if (static_cast<int>(mOutputDcBlockPrevIn.size()) < numChannels)
+    {
+        mOutputDcBlockPrevIn.resize(static_cast<size_t>(numChannels), 0.0f);
+        mOutputDcBlockPrevOut.resize(static_cast<size_t>(numChannels), 0.0f);
+    }
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        auto* d = buffer.getWritePointer(ch);
+        float prevIn = mOutputDcBlockPrevIn[static_cast<size_t>(ch)];
+        float prevOut = mOutputDcBlockPrevOut[static_cast<size_t>(ch)];
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const float x = d[i];
+            const float y = x - prevIn + (outputDcBlockCoeff * prevOut);
+            d[i] = y;
+            prevIn = x;
+            prevOut = y;
+        }
+        mOutputDcBlockPrevIn[static_cast<size_t>(ch)] = prevIn;
+        mOutputDcBlockPrevOut[static_cast<size_t>(ch)] = prevOut;
     }
 
     if (mScopeVisualiser != nullptr)
