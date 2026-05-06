@@ -41,6 +41,37 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Import signing certificates (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          MACOS_APP_CERT: ${{ secrets.MACOS_APP_CERT }}
+          MACOS_INSTALL_CERT: ${{ secrets.MACOS_INSTALL_CERT }}
+          MACOS_CERT_PWD: ${{ secrets.MACOS_CERT_PWD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MACOS_APP_CERT}" ] || [ -z "${MACOS_INSTALL_CERT}" ] || [ -z "${MACOS_CERT_PWD}" ]; then
+            echo "Required macOS signing secrets are missing."
+            exit 1
+          fi
+
+          APP_CERT_PATH="$RUNNER_TEMP/macos_app_cert.p12"
+          INSTALL_CERT_PATH="$RUNNER_TEMP/macos_install_cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build-signing.keychain-db"
+
+          echo "${MACOS_APP_CERT}" | base64 --decode > "${APP_CERT_PATH}"
+          echo "${MACOS_INSTALL_CERT}" | base64 --decode > "${INSTALL_CERT_PATH}"
+
+          security create-keychain -p "${MACOS_CERT_PWD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${MACOS_CERT_PWD}" "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" login.keychain-db
+
+          security import "${APP_CERT_PATH}" -k "${KEYCHAIN_PATH}" -P "${MACOS_CERT_PWD}" -T /usr/bin/codesign -T /usr/bin/productsign
+          security import "${INSTALL_CERT_PATH}" -k "${KEYCHAIN_PATH}" -P "${MACOS_CERT_PWD}" -T /usr/bin/codesign -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MACOS_CERT_PWD}" "${KEYCHAIN_PATH}"
+
       - name: Install Inno Setup (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -63,45 +94,108 @@ jobs:
           New-Item -ItemType Directory -Path Output -Force | Out-Null
           iscc installer_win.iss
 
-      - name: Package macOS bundles
+      - name: Code sign macOS plugin bundles
         if: matrix.os == 'macos-latest'
         shell: bash
+        env:
+          MACOS_CERT_PWD: ${{ secrets.MACOS_CERT_PWD }}
         run: |
-          mkdir -p dist
-          cp -R build/BoutiqueRumble_artefacts/Release/VST3/*.vst3 dist/
-          cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component dist/
-          cd dist
-          zip -r ../rumble-macos.zip ./*.vst3 ./*.component
+          set -euo pipefail
 
-      - name: Build macOS pkg installer
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          rm -rf STAGING
-          mkdir -p "STAGING/Library/Audio/Plug-Ins/VST3"
-          mkdir -p "STAGING/Library/Audio/Plug-Ins/Components"
-          mkdir -p STAGING/Library/Application\ Support/Rumble/Presets/
-
-          cp -R build/BoutiqueRumble_artefacts/Release/VST3/*.vst3 "STAGING/Library/Audio/Plug-Ins/VST3/"
-          cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "STAGING/Library/Audio/Plug-Ins/Components/"
-          if [ -d "Presets" ]; then
-            cp -R Presets/* STAGING/Library/Application\ Support/Rumble/Presets/ || true
+          APP_IDENTITY="$(security find-identity -v -p codesigning | awk -F\" '/Developer ID Application:/{print $2; exit}')"
+          if [ -z "${APP_IDENTITY}" ]; then
+            echo "Developer ID Application identity not found."
+            exit 1
           fi
 
-          pkgbuild --root STAGING \
-                   --identifier com.rumble.pkg.synth \
-                   --version 1.0.0 \
-                   --install-location / \
-                   Rumble_Installer.pkg
+          for vst3 in build/BoutiqueRumble_artefacts/Release/VST3/*.vst3; do
+            codesign --force --deep --timestamp --options runtime \
+                     --entitlements Source/entitlements.plist \
+                     --sign "${APP_IDENTITY}" "${vst3}"
+            codesign --verify --deep --strict --verbose=2 "${vst3}"
+          done
+
+          for component in build/BoutiqueRumble_artefacts/Release/AU/*.component; do
+            codesign --force --deep --timestamp --options runtime \
+                     --entitlements Source/entitlements.plist \
+                     --sign "${APP_IDENTITY}" "${component}"
+            codesign --verify --deep --strict --verbose=2 "${component}"
+          done
+
+      - name: Build, sign, notarize, and staple macOS pkg
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PWD: ${{ secrets.APPLE_ID_PWD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APPLE_ID}" ] || [ -z "${APPLE_ID_PWD}" ] || [ -z "${TEAM_ID}" ]; then
+            echo "Required notarization secrets are missing."
+            exit 1
+          fi
+
+          INSTALLER_IDENTITY="$(security find-identity -v -p basic | awk -F\" '/Developer ID Installer:/{print $2; exit}')"
+          if [ -z "${INSTALLER_IDENTITY}" ]; then
+            echo "Developer ID Installer identity not found."
+            exit 1
+          fi
+
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "${VERSION}" ] || [ "${VERSION}" = "${GITHUB_REF_NAME}" ]; then
+            VERSION="1.0.0"
+          fi
+
+          VST3_COMPONENT="$(ls -d build/BoutiqueRumble_artefacts/Release/VST3/*.vst3 | head -n 1)"
+          AU_COMPONENT="$(ls -d build/BoutiqueRumble_artefacts/Release/AU/*.component | head -n 1)"
+
+          if [ -z "${VST3_COMPONENT}" ] || [ -z "${AU_COMPONENT}" ]; then
+            echo "Expected VST3/AU build outputs were not found."
+            exit 1
+          fi
+
+          pkgbuild --component "${VST3_COMPONENT}" \
+                   --identifier com.rumble.plugin.vst3 \
+                   --version "${VERSION}" \
+                   --install-location /Library/Audio/Plug-Ins/VST3 \
+                   dist/Rumble_VST3.pkg
+
+          pkgbuild --component "${AU_COMPONENT}" \
+                   --identifier com.rumble.plugin.au \
+                   --version "${VERSION}" \
+                   --install-location /Library/Audio/Plug-Ins/Components \
+                   dist/Rumble_AU.pkg
+
+          productbuild --synthesize \
+                       --package dist/Rumble_VST3.pkg \
+                       --package dist/Rumble_AU.pkg \
+                       dist/Distribution.xml
+
+          productbuild --distribution dist/Distribution.xml \
+                       --package-path dist \
+                       dist/Rumble_Installer_unsigned.pkg
+
+          productsign --sign "${INSTALLER_IDENTITY}" \
+                      dist/Rumble_Installer_unsigned.pkg \
+                      dist/Rumble_Installer.pkg
+
+          xcrun notarytool submit dist/Rumble_Installer.pkg \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_ID_PWD}" \
+            --team-id "${TEAM_ID}" \
+            --wait
+
+          xcrun stapler staple dist/Rumble_Installer.pkg
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: rumble-macos
-          path: |
-            rumble-macos.zip
-            Rumble_Installer.pkg
+          path: dist/Rumble_Installer.pkg
           if-no-files-found: error
 
       - name: Upload Windows artifacts
@@ -131,6 +225,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/rumble-macos.zip
             dist/Rumble_Installer.pkg
             dist/Rumble_Setup.exe
