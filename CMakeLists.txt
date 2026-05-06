@@ -31,6 +31,7 @@ juce_add_plugin(BoutiqueRumble
     NEEDS_MIDI_INPUT TRUE
     PLUGIN_CODE "Rumb"      # Unique 4-char ID
     FORMATS ${RUMBLE_PLUGIN_FORMATS}
+    DESCRIPTION "Rumble Synthesizer"
     PRODUCT_NAME "Rumble")
 
 juce_generate_juce_header(BoutiqueRumble)
