@@ -196,24 +196,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. Ensure the destination folder exists
-          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          # 1. Use the System Library path (requires sudo)
+          TARGET_DIR="/Library/Audio/Plug-Ins/Components"
+          sudo mkdir -p "$TARGET_DIR"
 
-          # 2. Copy the AU component to the user's plug-in folder
-          # Note: We use the wildcard to ensure we grab the right .component bundle
-          cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "$HOME/Library/Audio/Plug-Ins/Components/"
+          # 2. Copy and scrub attributes
+          # The -cr flag recursively removes all extended attributes (like quarantine)
+          sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "$TARGET_DIR/"
+          sudo xattr -cr "$TARGET_DIR/Rumble.component"
 
-          # 3. Force macOS to refresh the audio component cache
-          # This is the "secret sauce" for headless builders
-          killall -9 AudioComponentRegistrar || echo "Registrar not running"
+          # 3. Force a registrar refresh
+          sudo killall -9 AudioComponentRegistrar || echo "Registrar not running"
           sleep 5
 
-          # 4. Run the validation
-          # Format: auval -v <type> <subtype> <manu>
-          # IDs must match CMakeLists.txt juce_add_plugin:
-          #   PLUGIN_CODE "Rumb"
-          #   MANUFACTURER_CODE "bdEn"
-          auval -v aumu Rumb bdEn
+          # 4. Run auval
+          # We use sudo here to ensure the tool has permission to read the system folder
+          sudo auval -v aumu Rumb bdEn
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
