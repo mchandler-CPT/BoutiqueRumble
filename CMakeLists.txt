@@ -26,8 +26,8 @@ juce_add_plugin(BoutiqueRumble
     COMPANY_NAME "bdEnergy"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    PLUGIN_CODE "RUM1"            
-    MANUFACTURER_CODE "BDE1"      
+    PLUGIN_CODE "RUMB"
+    MANUFACTURER_CODE "BDEN"
     PLUGIN_NAME "Rumble"
     PLUGIN_MANUFACTURER "bdEnergy"
     PRODUCT_NAME "Rumble"
@@ -38,10 +38,10 @@ juce_add_plugin(BoutiqueRumble
 
 if(APPLE)
     set_target_properties(BoutiqueRumble PROPERTIES 
-        JUCE_AU_MANUFACTURER_CODE "BDE1"
-        JUCE_AU_PLUGIN_CODE "RUM1"
-        JUCE_PLUGIN_CODE "RUM1"
-        JUCE_MANUFACTURER_CODE "BDE1"
+        JUCE_AU_MANUFACTURER_CODE "BDEN"
+        JUCE_AU_PLUGIN_CODE "RUMB"
+        JUCE_PLUGIN_CODE "RUMB"
+        JUCE_MANUFACTURER_CODE "BDEN"
     )
 endif()
 

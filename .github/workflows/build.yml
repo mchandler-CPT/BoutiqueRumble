@@ -190,7 +190,7 @@ jobs:
 
           xcrun stapler staple dist/Rumble_Installer.pkg
 
-      -- name: Remote Plugin Validation (AU)
+      - name: Remote Plugin Validation (AU)
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
@@ -206,7 +206,7 @@ jobs:
           sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/Rumble.component "$TARGET_DIR/"
           sudo xattr -cr "$TARGET_DIR/Rumble.component"
 
-          # 3. TRUTH CHECK: If this doesn't show BDE1 and RUM1, the build is failing
+          # 3. TRUTH CHECK: If this doesn't show BDEN and RUMB, the build is failing
           echo "--- Internal Plist Check ---"
           plutil -p "$TARGET_DIR/Rumble.component/Contents/Info.plist" | grep -A 15 "AudioComponents"
 
@@ -216,8 +216,8 @@ jobs:
           sleep 10
 
           # 5. VALIDATE: These codes MUST match the CMake exactly
-          # aumu = Type, RUM1 = Subtype, BDE1 = Manufacturer
-          sudo auval -v aumu RUM1 BDE1
+          # aumu = Type, RUMB = Subtype, BDEN = Manufacturer
+          sudo auval -v aumu RUMB BDEN
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
