@@ -122,8 +122,12 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
 
     mPrevButton.setButtonText("<");
     mNextButton.setButtonText(">");
+    mSaveButton.setButtonText("SAVE");
+    mSetFolderButton.setButtonText("SET FOLDER");
     mPrevButton.setTooltip("Previous preset");
     mNextButton.setTooltip("Next preset");
+    mSaveButton.setTooltip("Save current preset to file");
+    mSetFolderButton.setTooltip("Choose preset folder");
     mPrevButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a2622));
     mNextButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a2622));
     mPrevButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a322b));
@@ -132,6 +136,14 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
     mNextButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd7c3a7));
     mPrevButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7c3a7));
     mNextButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7c3a7));
+    mSaveButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a2622));
+    mSetFolderButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a2622));
+    mSaveButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a322b));
+    mSetFolderButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3a322b));
+    mSaveButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd7c3a7));
+    mSetFolderButton.setColour(juce::TextButton::textColourOnId, juce::Colour(0xffd7c3a7));
+    mSaveButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7c3a7));
+    mSetFolderButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7c3a7));
     mPrevButton.onClick = [this]
     {
         audioProcessor.loadPreviousPreset();
@@ -148,8 +160,12 @@ BoutiqueRumbleAudioProcessorEditor::BoutiqueRumbleAudioProcessorEditor (Boutique
         mPresetLabel.repaint();
         repaint(mPresetLabel.getBounds());
     };
+    mSaveButton.onClick = [this] { promptSavePreset(); };
+    mSetFolderButton.onClick = [this] { promptSetPresetFolder(); };
     addAndMakeVisible(mPrevButton);
     addAndMakeVisible(mNextButton);
+    addAndMakeVisible(mSaveButton);
+    addAndMakeVisible(mSetFolderButton);
 
     mPresetLabel.setText("Init", juce::dontSendNotification);
     mPresetLabel.setJustificationType(juce::Justification::centred);
@@ -236,6 +252,10 @@ void BoutiqueRumbleAudioProcessorEditor::resized()
     bounds.removeFromTop(24);
 
     auto navArea = presetArea.withSizeKeepingCentre(260, presetArea.getHeight());
+    auto actionsArea = presetArea.removeFromRight(250);
+    mSetFolderButton.setBounds(actionsArea.removeFromRight(120).reduced(2, 0));
+    mSaveButton.setBounds(actionsArea.removeFromRight(90).reduced(2, 0));
+    presetArea.removeFromRight(8);
     auto prevArea = navArea.removeFromLeft(36).reduced(2, 0);
     auto nextArea = navArea.removeFromRight(36).reduced(2, 0);
     mPrevButton.setBounds(prevArea);
@@ -387,9 +407,10 @@ void BoutiqueRumbleAudioProcessorEditor::refreshPresetUi()
 
 void BoutiqueRumbleAudioProcessorEditor::promptSavePreset()
 {
+    const auto currentName = mPresetLabel.getText().isEmpty() ? juce::String("Rumble") : mPresetLabel.getText();
     mPresetSaveChooser = std::make_unique<juce::FileChooser>(
         "Save Boutique Rumble Preset",
-        audioProcessor.getPresetDirectory().getChildFile(mPresetLabel.getText()),
+        audioProcessor.getPresetDirectory().getChildFile(currentName),
         "*");
 
     const int flags = juce::FileBrowserComponent::saveMode
@@ -400,10 +421,12 @@ void BoutiqueRumbleAudioProcessorEditor::promptSavePreset()
         const juce::File target = chooser.getResult();
         if (target != juce::File{})
         {
-            const juce::String chosenPresetName = target.getFileName().trim();
-            if (! chosenPresetName.isEmpty() && audioProcessor.savePreset(chosenPresetName))
+            const juce::File outputFile = target;
+            audioProcessor.saveCurrentPreset(outputFile);
+            if (outputFile.existsAsFile())
             {
-                mPresetLabel.setText(target.getFileName(), juce::dontSendNotification);
+                audioProcessor.setPresetDirectory(outputFile.getParentDirectory());
+                mPresetLabel.setText(outputFile.getFileName(), juce::dontSendNotification);
                 mPresetLabel.repaint();
                 repaint(mPresetLabel.getBounds());
             }
@@ -411,5 +434,27 @@ void BoutiqueRumbleAudioProcessorEditor::promptSavePreset()
 
         refreshPresetUi();
         mPresetSaveChooser.reset();
+    });
+}
+
+void BoutiqueRumbleAudioProcessorEditor::promptSetPresetFolder()
+{
+    mPresetFolderChooser = std::make_unique<juce::FileChooser>(
+        "Choose Boutique Rumble Preset Folder",
+        audioProcessor.getPresetDirectory(),
+        "*");
+
+    const int flags = juce::FileBrowserComponent::openMode
+                    | juce::FileBrowserComponent::canSelectDirectories;
+    mPresetFolderChooser->launchAsync(flags, [this] (const juce::FileChooser& chooser)
+    {
+        const juce::File chosenFolder = chooser.getResult();
+        if (chosenFolder != juce::File{})
+        {
+            audioProcessor.setPresetDirectory(chosenFolder);
+            refreshPresetUi();
+        }
+
+        mPresetFolderChooser.reset();
     });
 }

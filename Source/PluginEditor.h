@@ -19,6 +19,7 @@ private:
     void mouseUp(const juce::MouseEvent& event) override;
     void refreshPresetUi();
     void promptSavePreset();
+    void promptSetPresetFolder();
 
     BoutiqueRumbleAudioProcessor& audioProcessor;
     BoutiqueLookAndFeel boutiqueLookAndFeel;
@@ -58,8 +59,11 @@ private:
     juce::ToggleButton syncLightButton;
     juce::TextButton mPrevButton;
     juce::TextButton mNextButton;
+    juce::TextButton mSaveButton;
+    juce::TextButton mSetFolderButton;
     juce::Label mPresetLabel;
     std::unique_ptr<juce::FileChooser> mPresetSaveChooser;
+    std::unique_ptr<juce::FileChooser> mPresetFolderChooser;
     int mSelectedPresetIndex { -1 };
     float mSyncPulsePhase { 0.0f };
 

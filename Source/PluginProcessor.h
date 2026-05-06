@@ -21,12 +21,14 @@ public:
     bool loadPreset(int index);
     bool loadNextPreset();
     bool loadPreviousPreset();
-    void saveCurrentPreset(juce::String name);
+    void saveCurrentPreset(juce::File file);
     bool savePreset(const juce::String& name);
     const juce::StringArray& getPresetList() const noexcept { return mPresetNames; }
     int getCurrentPresetIndex() const noexcept { return mCurrentPresetIndex; }
     juce::String getCurrentPresetDisplayName() const;
     const juce::File& getPresetDirectory() const noexcept { return mPresetDir; }
+    juce::File getDefaultPresetDirectory() const;
+    bool setPresetDirectory(const juce::File& directory);
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -72,6 +74,7 @@ private:
     std::atomic<float>* cutoffParam { nullptr };
     std::atomic<float>* resoParam { nullptr };
     juce::AudioVisualiserComponent* mScopeVisualiser { nullptr };
+    std::unique_ptr<juce::PropertiesFile> mSettings;
     juce::File mPresetDir;
     juce::Array<juce::File> mPresetFiles;
     juce::StringArray mPresetNames;

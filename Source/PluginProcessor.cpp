@@ -13,10 +13,7 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
            .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
         #endif
        ),
-      apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()), // The Handshake
-      mPresetDir(juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-                     .getChildFile("Rumble")
-                     .getChildFile("Presets"))
+      apvts (*this, nullptr, "RUMBLE_PARAMS", createParameterLayout()) // The Handshake
 {
     pulseParam = apvts.getRawParameterValue(IDs::pulse);
     shapeParam = apvts.getRawParameterValue(IDs::shape);
@@ -29,8 +26,30 @@ BoutiqueRumbleAudioProcessor::BoutiqueRumbleAudioProcessor()
     cutoffParam = apvts.getRawParameterValue(IDs::cutoff);
     resoParam = apvts.getRawParameterValue(IDs::reso);
     rumbleEngine.setBrakeParameter(brakeParam);
+
+    juce::PropertiesFile::Options options;
+    options.applicationName = JucePlugin_Name;
+    options.filenameSuffix = "settings";
+    options.folderName = "Rumble";
+    options.osxLibrarySubFolder = "Application Support";
+    options.storageFormat = juce::PropertiesFile::storeAsXML;
+    mSettings = std::make_unique<juce::PropertiesFile>(options);
+
+    mPresetDir = getDefaultPresetDirectory();
+    if (mSettings != nullptr)
+    {
+        const auto savedPresetPath = mSettings->getValue("presetPath");
+        if (savedPresetPath.isNotEmpty())
+        {
+            const juce::File storedPath(savedPresetPath);
+            if (storedPath.isDirectory() || ! storedPath.exists())
+                mPresetDir = storedPath;
+        }
+    }
+
     if (! mPresetDir.exists())
         mPresetDir.createDirectory();
+
     updatePresetList();
 }
 
@@ -168,23 +187,63 @@ bool BoutiqueRumbleAudioProcessor::savePreset(const juce::String& name)
         mPresetDir.createDirectory();
 
     auto presetFile = mPresetDir.getChildFile(safeName);
-    if (auto xml = apvts.copyState().createXml())
+    saveCurrentPreset(presetFile);
+    if (presetFile.existsAsFile())
     {
-        if (xml->writeTo(presetFile))
+        updatePresetList();
+        for (int i = 0; i < mPresetFiles.size(); ++i)
         {
-            updatePresetList();
-            for (int i = 0; i < mPresetFiles.size(); ++i)
+            if (mPresetFiles.getReference(i).getFileName() == presetFile.getFileName())
             {
-                if (mPresetFiles.getReference(i).getFileName() == presetFile.getFileName())
-                {
-                    mCurrentPresetIndex = i;
-                    break;
-                }
+                mCurrentPresetIndex = i;
+                break;
             }
-            return true;
         }
+        return true;
     }
     return false;
+}
+
+void BoutiqueRumbleAudioProcessor::saveCurrentPreset(juce::File file)
+{
+    if (file == juce::File{})
+        return;
+
+    if (auto parent = file.getParentDirectory(); parent != juce::File{} && ! parent.exists())
+        parent.createDirectory();
+
+    if (auto xml = apvts.copyState().createXml())
+        xml->writeTo(file);
+}
+
+juce::File BoutiqueRumbleAudioProcessor::getDefaultPresetDirectory() const
+{
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+        .getChildFile("Rumble")
+        .getChildFile("Presets");
+}
+
+bool BoutiqueRumbleAudioProcessor::setPresetDirectory(const juce::File& directory)
+{
+    if (directory == juce::File{})
+        return false;
+
+    juce::File resolvedDir = directory;
+    if (resolvedDir.existsAsFile())
+        resolvedDir = resolvedDir.getParentDirectory();
+
+    if (! resolvedDir.exists() && ! resolvedDir.createDirectory())
+        return false;
+
+    mPresetDir = resolvedDir;
+    if (mSettings != nullptr)
+    {
+        mSettings->setValue("presetPath", mPresetDir.getFullPathName());
+        mSettings->saveIfNeeded();
+    }
+
+    updatePresetList();
+    return true;
 }
 
 juce::String BoutiqueRumbleAudioProcessor::getCurrentPresetDisplayName() const
