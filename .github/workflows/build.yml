@@ -197,31 +197,28 @@ jobs:
           set -euo pipefail
 
           TARGET_DIR="/Library/Audio/Plug-Ins/Components"
+          sudo rm -rf "$TARGET_DIR/Rumble.component"
           sudo mkdir -p "$TARGET_DIR"
 
-          # 1. Diagnostic: List what we actually built
-          echo "Built components:"
-          ls -d build/BoutiqueRumble_artefacts/Release/AU/*.component
+          # 1. Copy the signed/notarized component
+          sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/Rumble.component "$TARGET_DIR/"
+          sudo xattr -cr "$TARGET_DIR/Rumble.component"
 
-          # 2. Copy and clean
-          sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "$TARGET_DIR/"
-          
-          # Get the actual filename dynamically to avoid typos
-          COMP_FILE=$(ls "$TARGET_DIR" | grep "Rumble" | head -n 1)
-          echo "Validating: $COMP_FILE"
-          sudo xattr -cr "$TARGET_DIR/$COMP_FILE"
+          # 2. THE TRUTH CHECK: What does the OS actually see inside the file?
+          echo "--- Content of Info.plist ---"
+          plutil -p "$TARGET_DIR/Rumble.component/Contents/Info.plist" | grep -A 15 "AudioComponents"
 
-          # 3. Force Registration (The Pro Way)
-          # pluginkit forces the OS to register the bundle immediately
-          sudo pluginkit -a "$TARGET_DIR/$COMP_FILE"
+          # 3. Force registration
+          sudo pluginkit -a "$TARGET_DIR/Rumble.component"
           sudo killall -9 AudioComponentRegistrar || echo "Registrar not running"
-          sleep 10 # Give it a long soak
+          sleep 10
 
-          # 4. Final Validation
-          # If this fails, auval -a will show us EVERYTHING it sees
-          echo "Scanning all available AUs..."
-          auval -a | grep -i "Rumb" || echo "Plugin not found in system list"
-          
+          # 4. Search the system for our specific ID
+          echo "Searching for registered component..."
+          auval -a | grep "Rumb"
+
+          # 5. Run validation with the IDs from your CMake
+          # Using 'bdEn' to match your explicit code
           sudo auval -v aumu Rumb bdEn
 
       - name: Upload macOS artifacts
