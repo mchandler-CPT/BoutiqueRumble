@@ -190,6 +190,15 @@ jobs:
 
           xcrun stapler staple dist/Rumble_Installer.pkg
 
+      - name: Remote Plugin Validation
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "$HOME/Library/Audio/Plug-Ins/Components/"
+          auval -v aumu Rumb Manu
+
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
