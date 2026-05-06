@@ -22,13 +22,12 @@ if(APPLE)
     list(APPEND RUMBLE_PLUGIN_FORMATS AU)
 endif()
 
-# 2. Define the Plugin
 juce_add_plugin(BoutiqueRumble
     COMPANY_NAME "bdEnergy"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    PLUGIN_CODE "RUMX"            
-    MANUFACTURER_CODE "BDEX"      
+    PLUGIN_CODE "RUM1"            
+    MANUFACTURER_CODE "BDE1"      
     PLUGIN_NAME "Rumble"
     PLUGIN_MANUFACTURER "bdEnergy"
     PRODUCT_NAME "Rumble"
@@ -37,11 +36,12 @@ juce_add_plugin(BoutiqueRumble
     DESCRIPTION "Rumble Synth"
 )
 
-# 3. THE SLEDGEHAMMER (Ensures AU target gets these properties)
 if(APPLE)
     set_target_properties(BoutiqueRumble PROPERTIES 
-        JUCE_AU_MANUFACTURER_CODE "BDEX"
-        JUCE_AU_PLUGIN_CODE "RUMX"
+        JUCE_AU_MANUFACTURER_CODE "BDE1"
+        JUCE_AU_PLUGIN_CODE "RUM1"
+        JUCE_PLUGIN_CODE "RUM1"
+        JUCE_MANUFACTURER_CODE "BDE1"
     )
 endif()
 

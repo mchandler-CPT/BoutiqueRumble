@@ -190,44 +190,34 @@ jobs:
 
           xcrun stapler staple dist/Rumble_Installer.pkg
 
-      - name: Remote Plugin Validation (AU)
+      -- name: Remote Plugin Validation (AU)
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           set -euo pipefail
 
-          # 1. PATHS
-          SYS_DIR="/Library/Audio/Plug-Ins/Components"
-          USR_DIR="$HOME/Library/Audio/Plug-Ins/Components"
+          TARGET_DIR="/Library/Audio/Plug-Ins/Components"
           
-          # 2. THE PURGE: Nuke old versions in BOTH locations
-          sudo rm -rf "$SYS_DIR/Rumble.component"
-          rm -rf "$USR_DIR/Rumble.component"
-          sudo mkdir -p "$SYS_DIR"
+          # 1. Clean the environment
+          sudo rm -rf "$TARGET_DIR/Rumble.component"
+          sudo mkdir -p "$TARGET_DIR"
 
-          # 3. Copy fresh build to System folder
-          sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/Rumble.component "$SYS_DIR/"
-          sudo xattr -cr "$SYS_DIR/Rumble.component"
+          # 2. Copy the fresh build
+          sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/Rumble.component "$TARGET_DIR/"
+          sudo xattr -cr "$TARGET_DIR/Rumble.component"
 
-          # 4. TRUTH CHECK: Print the plist (Check if IDs are RUMX and BDEX)
+          # 3. TRUTH CHECK: If this doesn't show BDE1 and RUM1, the build is failing
           echo "--- Internal Plist Check ---"
-          plutil -p "$SYS_DIR/Rumble.component/Contents/Info.plist" | grep -A 10 "AudioComponents"
+          plutil -p "$TARGET_DIR/Rumble.component/Contents/Info.plist" | grep -A 15 "AudioComponents"
 
-          # 5. FORCE RE-REGISTRATION
-          # We explicitly remove any registration for 'Rumble' then add it fresh
-          sudo pluginkit -r "$SYS_DIR/Rumble.component" || echo "Nothing to remove"
-          sudo pluginkit -a "$SYS_DIR/Rumble.component"
-          
-          # Kick the registrar daemon
+          # 4. Force Registration
+          sudo pluginkit -a "$TARGET_DIR/Rumble.component"
           sudo killall -9 AudioComponentRegistrar || echo "Registrar not running"
           sleep 10
 
-          # 6. VALIDATE (Using the NEW 'RUMX' and 'BDEX' codes)
-          # We run -a first to see what the registry actually thinks
-          echo "Current Registered AUs:"
-          auval -a | grep -i "Rumble"
-          
-          sudo auval -v aumu RUMX BDEX
+          # 5. VALIDATE: These codes MUST match the CMake exactly
+          # aumu = Type, RUM1 = Subtype, BDE1 = Manufacturer
+          sudo auval -v aumu RUM1 BDE1
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
