@@ -27,14 +27,18 @@ juce_add_plugin(BoutiqueRumble
     COMPANY_NAME "bdEnergy"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    PLUGIN_CODE "Rumb"            
-    MANUFACTURER_CODE "bdEn"      
-    PLUGIN_NAME "Rumble"
-    PLUGIN_MANUFACTURER "bdEnergy"
+    PLUGIN_CODE "RUMB"            
+    MANUFACTURER_CODE "BDEN"      
     PRODUCT_NAME "Rumble"
     BUNDLE_ID "com.synth.rumble"
-    DESCRIPTION "Rumble Synthesizer"
     FORMATS ${RUMBLE_PLUGIN_FORMATS}
+    DESCRIPTION "Boutique Rumble Synth"
+)
+
+set_target_properties(BoutiqueRumble PROPERTIES
+    JUCE_PLUGIN_CODE "RUMB"
+    JUCE_MANUFACTURER_CODE "BDEN"
+    JUCE_AU_MAIN_TYPE kAudioUnitType_MusicDevice
 )
 
 juce_generate_juce_header(BoutiqueRumble)

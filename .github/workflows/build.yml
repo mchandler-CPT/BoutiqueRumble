@@ -197,29 +197,26 @@ jobs:
           set -euo pipefail
 
           TARGET_DIR="/Library/Audio/Plug-Ins/Components"
+          
+          # 1. DELETE the old one first to ensure a fresh scan
           sudo rm -rf "$TARGET_DIR/Rumble.component"
           sudo mkdir -p "$TARGET_DIR"
 
-          # 1. Copy the signed/notarized component
+          # 2. Copy the fresh build
           sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/Rumble.component "$TARGET_DIR/"
           sudo xattr -cr "$TARGET_DIR/Rumble.component"
 
-          # 2. THE TRUTH CHECK: What does the OS actually see inside the file?
-          echo "--- Content of Info.plist ---"
-          plutil -p "$TARGET_DIR/Rumble.component/Contents/Info.plist" | grep -A 15 "AudioComponents"
+          # 3. Logic Check: Print the Info.plist again
+          echo "--- Verifying Built Metadata ---"
+          plutil -p "$TARGET_DIR/Rumble.component/Contents/Info.plist" | grep -A 10 "AudioComponents"
 
-          # 3. Force registration
+          # 4. Force Registration
           sudo pluginkit -a "$TARGET_DIR/Rumble.component"
           sudo killall -9 AudioComponentRegistrar || echo "Registrar not running"
           sleep 10
 
-          # 4. Search the system for our specific ID
-          echo "Searching for registered component..."
-          auval -a | grep "Rumb"
-
-          # 5. Run validation with the IDs from your CMake
-          # Using 'bdEn' to match your explicit code
-          sudo auval -v aumu Rumb bdEn
+          # 5. Run validation with ALL CAPS IDs (Matching the new CMake)
+          sudo auval -v aumu RUMB BDEN
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
