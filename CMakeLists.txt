@@ -25,6 +25,7 @@ endif()
 # 2. Define the Plugin
 juce_add_plugin(BoutiqueRumble
     COMPANY_NAME "bdEnergy"
+    MANUFACTURER_CODE "bdEn"
     BUNDLE_ID "com.yourname.rumble"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
