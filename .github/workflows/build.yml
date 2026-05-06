@@ -190,14 +190,29 @@ jobs:
 
           xcrun stapler staple dist/Rumble_Installer.pkg
 
-      - name: Remote Plugin Validation
+      - name: Remote Plugin Validation (AU)
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           set -euo pipefail
+
+          # 1. Ensure the destination folder exists
           mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+
+          # 2. Copy the AU component to the user's plug-in folder
+          # Note: We use the wildcard to ensure we grab the right .component bundle
           cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "$HOME/Library/Audio/Plug-Ins/Components/"
-          auval -v aumu Rumb Manu
+
+          # 3. Force macOS to refresh the audio component cache
+          # This is the "secret sauce" for headless builders
+          killall -9 AudioComponentRegistrar || echo "Registrar not running"
+          sleep 5
+
+          # 4. Run the validation
+          # Format: auval -v <type> <subtype> <manu>
+          # aumu = Synth, Rumb = Plugin Code, Bout = Manufacturer Code
+          # Change 'Bout' to 'Manu' if you haven't updated CMakeLists.txt yet!
+          auval -v aumu Rumb Bout
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
