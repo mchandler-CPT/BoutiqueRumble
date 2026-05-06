@@ -26,13 +26,17 @@ endif()
 juce_add_plugin(BoutiqueRumble
     COMPANY_NAME "bdEnergy"
     MANUFACTURER_CODE "bdEn"
+    PLUGIN_CODE "Rumb"
+    PRODUCT_NAME "Rumble"
+    PLUGIN_NAME "Rumble"               # Explicitly set the name strings
+    PLUGIN_MANUFACTURER "bdEnergy"     # Explicitly set manufacturer string
+    AU_MAIN_TYPE kAudioUnitType_MusicDevice # Hard-code to Synth type
     BUNDLE_ID "com.synth.rumble"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
-    PLUGIN_CODE "Rumb"      # Unique 4-char ID
-    FORMATS ${RUMBLE_PLUGIN_FORMATS}
     DESCRIPTION "Rumble Synthesizer"
-    PRODUCT_NAME "Rumble")
+    FORMATS ${RUMBLE_PLUGIN_FORMATS}
+)
 
 juce_generate_juce_header(BoutiqueRumble)
 

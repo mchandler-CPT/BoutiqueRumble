@@ -196,21 +196,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. Use the System Library path (requires sudo)
           TARGET_DIR="/Library/Audio/Plug-Ins/Components"
           sudo mkdir -p "$TARGET_DIR"
 
-          # 2. Copy and scrub attributes
-          # The -cr flag recursively removes all extended attributes (like quarantine)
+          # 1. Diagnostic: List what we actually built
+          echo "Built components:"
+          ls -d build/BoutiqueRumble_artefacts/Release/AU/*.component
+
+          # 2. Copy and clean
           sudo cp -R build/BoutiqueRumble_artefacts/Release/AU/*.component "$TARGET_DIR/"
-          sudo xattr -cr "$TARGET_DIR/Rumble.component"
+          
+          # Get the actual filename dynamically to avoid typos
+          COMP_FILE=$(ls "$TARGET_DIR" | grep "Rumble" | head -n 1)
+          echo "Validating: $COMP_FILE"
+          sudo xattr -cr "$TARGET_DIR/$COMP_FILE"
 
-          # 3. Force a registrar refresh
+          # 3. Force Registration (The Pro Way)
+          # pluginkit forces the OS to register the bundle immediately
+          sudo pluginkit -a "$TARGET_DIR/$COMP_FILE"
           sudo killall -9 AudioComponentRegistrar || echo "Registrar not running"
-          sleep 5
+          sleep 10 # Give it a long soak
 
-          # 4. Run auval
-          # We use sudo here to ensure the tool has permission to read the system folder
+          # 4. Final Validation
+          # If this fails, auval -a will show us EVERYTHING it sees
+          echo "Scanning all available AUs..."
+          auval -a | grep -i "Rumb" || echo "Plugin not found in system list"
+          
           sudo auval -v aumu Rumb bdEn
 
       - name: Upload macOS artifacts
