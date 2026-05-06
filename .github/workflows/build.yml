@@ -210,9 +210,10 @@ jobs:
 
           # 4. Run the validation
           # Format: auval -v <type> <subtype> <manu>
-          # aumu = Synth, Rumb = Plugin Code, Bout = Manufacturer Code
-          # Change 'Bout' to 'Manu' if you haven't updated CMakeLists.txt yet!
-          auval -v aumu Rumb Bout
+          # IDs must match CMakeLists.txt juce_add_plugin:
+          #   PLUGIN_CODE "Rumb"
+          #   MANUFACTURER_CODE "bdEn"
+          auval -v aumu Rumb bdEn
 
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
